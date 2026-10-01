@@ -32,6 +32,8 @@ Adjust folder name if yours is different.
 3. Import file:
    - `database/schema-and-seed.sql`
 
+For the production migration that preserves the existing `virtuevisa.com` data, use the encrypted snapshot and restore instructions in `database/backups/README.md` instead of `database/schema-and-seed.sql`.
+
 ## 5) Configure `.env`
 In `/home/USERNAME/vertue-crm/.env`:
 ```env
@@ -79,4 +81,3 @@ In cPanel File Manager, set writable permissions (usually 755/775 depending host
 - Set strong DB password
 - Enable SSL and force HTTPS
 - Enable daily DB backups in cPanel
-
