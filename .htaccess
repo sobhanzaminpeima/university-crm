@@ -1,4 +1,9 @@
 <IfModule mod_rewrite.c>
+  Options -Indexes
   RewriteEngine On
-  RewriteRule ^$ public_html/ [L]
+
+  # Hostinger Git deploys the repository itself into public_html. Keep the
+  # Laravel application private and forward every public request to /public.
+  RewriteCond %{REQUEST_URI} !^/public/
+  RewriteRule ^(.*)$ public/$1 [L]
 </IfModule>
