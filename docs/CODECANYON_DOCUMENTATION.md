@@ -3,7 +3,7 @@
 
 Version: 1.0.0  
 Author: Vertue  
-Framework: Laravel 10 / PHP 8.1+
+Framework: Laravel 12 / PHP 8.3+
 
 ## 1) Product Overview
 Vertue CRM is a multi-tenant student recruitment CRM with a dedicated Student Portal.
@@ -26,7 +26,7 @@ Core modules:
 - Portal Messaging
 
 ## 2) Server Requirements
-- PHP 8.1 or newer
+- PHP 8.3 or newer
 - MySQL 8+ (or MariaDB compatible)
 - Composer 2+
 - Required PHP extensions: `pdo`, `pdo_mysql`, `mbstring`, `openssl`, `tokenizer`, `ctype`, `json`, `fileinfo`
@@ -44,7 +44,7 @@ Core modules:
 ## 4) Quick Installation (Local / XAMPP)
 1. Copy project to `htdocs` (example: `C:\xampp\htdocs\laravel-crm-cpanel`).
 2. Create a MySQL database (example: `vertue_crm`).
-3. Import `database/schema-and-seed.sql` in phpMyAdmin.
+3. Run `php artisan migrate --seed` on a clean local database. The legacy SQL installer is for isolated demo use only.
 4. Copy `.env.example` to `.env`.
 5. Update `.env`:
    - `APP_ENV=local`
@@ -72,19 +72,13 @@ Open:
 - Student Portal Login: `http://127.0.0.1:8000/portal/login`
 
 ## 5) Demo Credentials
-CRM Super Admin:
-- Email: `admincrm@vertue.com`
-- Password: `Vertue2026`
-
-Student Portal Demo User:
-- Email: `priya@example.com`
-- Password: `Student123!`
+No reusable credentials are published with the production source. Create test accounts locally with strong, unique passwords and never reuse them in production.
 
 ## 6) cPanel Deployment
 Use `DEPLOY-CPANEL.md`. Summary:
 1. Upload files to cPanel.
 2. Point domain/subdomain document root to `public/`.
-3. Import `database/schema-and-seed.sql`.
+3. Run `php artisan migrate --force`; restore production data only from an approved encrypted backup.
 4. Configure `.env` for production.
 5. Run artisan cache clear commands (via Terminal or temporary route).
 6. Ensure `storage/` and `bootstrap/cache/` are writable.

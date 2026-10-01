@@ -19,7 +19,7 @@ This folder is the buyer-facing documentation pack for CodeCanyon delivery.
 - Student Portal Dashboard: `/portal/dashboard`
 
 ## Minimum Requirements
-- PHP 8.1+
+- PHP 8.3+
 - MySQL 8+ (or MariaDB compatible)
 - Composer 2+
 - Apache or Nginx rewrite enabled

@@ -51,8 +51,8 @@ No demo-only fake flows. Core modules are connected to database operations and r
 - University browsing
 
 ## Technical Stack
-- Laravel 10
-- PHP 8.1+
+- Laravel 12
+- PHP 8.3+
 - MySQL
 - Blade UI
 - JWT support for API endpoints
@@ -65,18 +65,12 @@ No demo-only fake flows. Core modules are connected to database operations and r
 - QA/testing checklist
 
 ## Demo Credentials
-Admin (CRM):
-- Email: `admincrm@vertue.com`
-- Password: `Vertue2026`
-
-Student (Portal):
-- Email: `priya@example.com`
-- Password: `Student123!`
+Demo credentials must be supplied privately for a dedicated demo environment. No reusable administrator password is included in the public package.
 
 ## Installation Summary
 1. Upload files
 2. Configure `.env`
-3. Import `database/schema-and-seed.sql`
+3. Run Laravel migrations on a clean database
 4. Run:
    - `composer install`
    - `php artisan key:generate`
@@ -111,7 +105,6 @@ Support excludes:
 - 3rd-party custom integrations unless agreed separately
 
 ## Notes
-- Requires PHP 8.1+ and MySQL.
+- Requires PHP 8.3+ and MySQL.
 - Use HTTPS and secure production settings on live servers.
-- Change all default credentials immediately after installation.
-
+- Provision unique credentials and keep production secrets outside the repository.

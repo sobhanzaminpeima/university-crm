@@ -1,15 +1,7 @@
-# Demo Credentials
+# Demo access
 
-## CRM Admin
-- Email: `admincrm@vertue.com`
-- Password: `Vertue2026`
+Reusable administrator and student passwords are not distributed with the source package.
 
-## Student Portal
-- Email: `priya@example.com`
-- Password: `Student123!`
+For demonstrations, create accounts in a dedicated non-production environment with unique passwords. Share access privately, expire it after review and never reuse production credentials.
 
-## Security Notice
-After installation:
-1. Change all default passwords
-2. Remove public demo users if not needed
-3. Restrict admin access by IP/WAF if possible
+After installation, verify that no seed or imported account retains a known password and limit privileged roles to authorized staff.
