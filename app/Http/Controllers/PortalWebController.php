@@ -22,6 +22,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\View\View;
 
 class PortalWebController extends Controller
@@ -59,6 +60,12 @@ class PortalWebController extends Controller
                 ->withInput($request->except('password'))
                 ->withErrors(['login' => 'The login field is required.']);
         }
+        $rateKey = 'portal-login:'.sha1(mb_strtolower($login).'|'.$request->ip());
+        if (RateLimiter::tooManyAttempts($rateKey, 5)) {
+            return back()->withInput($request->except('password'))->withErrors([
+                'login' => 'Too many login attempts. Try again in '.RateLimiter::availableIn($rateKey).' seconds.',
+            ]);
+        }
         try {
             $normalizedLogin = mb_strtolower($login);
             $user = User::query()
@@ -76,42 +83,22 @@ class PortalWebController extends Controller
                 ->withErrors(['login' => 'Database connection failed. Please start MySQL and try again.']);
         }
 
-        if (!$user) {
-            $studentExists = Student::query()
-                ->where(function ($q) use ($login) {
-                    $q->where('email', $login)->orWhere('full_name', $login);
-                })
-                ->exists();
-
-            if ($studentExists) {
-                return back()
-                    ->withInput($request->except('password'))
-                    ->withErrors(['login' => 'Portal account is not configured for this student. Please contact admin.']);
-            }
-        }
-
         $passwordOk = $user ? Hash::check($data['password'], (string) $user->password) : false;
 
-        if ($user && !(bool) $user->is_active) {
-            return back()
-                ->withInput($request->except('password'))
-                ->withErrors(['login' => 'Your student account is inactive. Please contact admin.']);
-        }
-        if ($user) {
-            $tenant = Tenant::query()->find($user->tenant_id);
-            if (!$tenant || (int) ($tenant->is_active ?? 1) !== 1 || (string) ($tenant->subscription_status ?? 'active') !== 'active') {
-                return back()
-                    ->withInput($request->except('password'))
-                    ->withErrors(['login' => 'Portal is not active for your company yet.']);
-            }
-        }
-
-        if (!$user || !$passwordOk) {
+        if (!$user || !$passwordOk || !(bool) $user->is_active) {
+            RateLimiter::hit($rateKey, 300);
             return back()
                 ->withInput($request->except('password'))
                 ->withErrors(['login' => 'Invalid credentials']);
         }
+        $tenant = Tenant::query()->find($user->tenant_id);
+        if (!$tenant || (int) ($tenant->is_active ?? 1) !== 1 || (string) ($tenant->subscription_status ?? 'active') !== 'active') {
+            return back()
+                ->withInput($request->except('password'))
+                ->withErrors(['login' => 'Portal is not active for your company yet.']);
+        }
         Auth::guard('crm')->logout();
+        RateLimiter::clear($rateKey);
         Auth::guard('student')->login($user, false);
         $request->session()->regenerate();
         $request->session()->regenerateToken();

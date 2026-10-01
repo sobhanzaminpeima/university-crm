@@ -39,6 +39,33 @@ foreach (['auth.crm', 'tenant', 'subscription.active', 'permission:telegram.use'
     }
 }
 
+$securityExpectations = [
+    'routes/web.php' => [
+        "telegram/webhook/{secret}', [TelegramWebhookController::class, 'handle'])->middleware('throttle:",
+        "webhooks/student-status', [WebhookController::class, 'studentStatus'])->middleware('throttle:",
+        "Route::get('/up'",
+    ],
+    'app/Http/Controllers/HealthController.php' => [
+        'Hash::check',
+        'hash_hmac',
+        'hash_equals',
+        'ensureSuperAdmin',
+    ],
+    'app/Http/Middleware/SecurityHeaders.php' => [
+        'X-Content-Type-Options',
+        'X-Frame-Options',
+        'Strict-Transport-Security',
+    ],
+];
+foreach ($securityExpectations as $file => $needles) {
+    $contents = file_get_contents($root.'/'.$file) ?: '';
+    foreach ($needles as $needle) {
+        if (!str_contains($contents, $needle)) {
+            $errors[] = "Missing security control in {$file}: {$needle}";
+        }
+    }
+}
+
 if ($errors) {
     fwrite(STDERR, implode(PHP_EOL, $errors).PHP_EOL);
     exit(1);

@@ -11,6 +11,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\RateLimiter;
 
 class PortalController extends Controller
 {
@@ -20,10 +21,16 @@ class PortalController extends Controller
             'email' => 'required|email',
             'password' => 'required|string',
         ]);
+        $rateKey = 'portal-api-login:'.sha1(mb_strtolower($data['email']).'|'.$request->ip());
+        if (RateLimiter::tooManyAttempts($rateKey, 5)) {
+            return response()->json(['message' => 'Too many login attempts', 'retry_after' => RateLimiter::availableIn($rateKey)], 429);
+        }
         $user = User::query()->where('email', $data['email'])->where('role_slug', 'student')->whereNull('deleted_at')->first();
         if (!$user || !$user->is_active || !Hash::check($data['password'], $user->password)) {
+            RateLimiter::hit($rateKey, 300);
             return response()->json(['message' => 'Invalid credentials'], 401);
         }
+        RateLimiter::clear($rateKey);
         if (!class_exists(\App\Support\AuthUser::class)) {
             return response()->json(['message' => 'Auth token service missing'], 500);
         }

@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
+use Illuminate\Http\JsonResponse;
 
 class HealthController extends Controller
 {
@@ -32,6 +33,21 @@ class HealthController extends Controller
         'study_fields',
         'intake_terms',
     ];
+
+    public function readiness(): JsonResponse
+    {
+        try {
+            DB::select('SELECT 1');
+            $storage = is_dir(storage_path('framework')) && is_writable(storage_path('framework'));
+            if (!$storage) {
+                throw new \RuntimeException('Storage is unavailable.');
+            }
+
+            return response()->json(['status' => 'ok', 'timestamp' => now()->toIso8601String()]);
+        } catch (\Throwable) {
+            return response()->json(['status' => 'unavailable'], 503);
+        }
+    }
 
     public function index(Request $request): View
     {

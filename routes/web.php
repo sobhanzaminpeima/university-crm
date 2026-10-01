@@ -40,6 +40,7 @@ Route::post('/register', [LandingController::class, 'register']);
 Route::get('/privacy-policy', [LandingController::class, 'privacy']);
 Route::get('/contact', [LandingController::class, 'contact']);
 Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
+Route::get('/up', [HealthController::class, 'readiness'])->middleware('throttle:30,1');
 Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
 Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth.crm');
 Route::post('/portal/logout', [PortalWebController::class, 'logout'])->middleware('auth.student');

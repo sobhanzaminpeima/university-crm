@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\View\View;
 
 class AuthController extends Controller
@@ -30,6 +31,10 @@ class AuthController extends Controller
         if ($login === '') {
             return back()->withErrors(['login' => 'Login is required'])->withInput();
         }
+        $rateKey = 'crm-login:'.sha1(mb_strtolower($login).'|'.$request->ip());
+        if (RateLimiter::tooManyAttempts($rateKey, 5)) {
+            return back()->withErrors(['login' => 'Too many login attempts. Try again in '.RateLimiter::availableIn($rateKey).' seconds.'])->withInput();
+        }
 
         try {
             $user = User::query()
@@ -46,6 +51,7 @@ class AuthController extends Controller
                 ->withErrors(['login' => 'Database connection failed. Please start MySQL and try again.']);
         }
         if (!$user || !$user->is_active || !Hash::check($data['password'], $user->password)) {
+            RateLimiter::hit($rateKey, 300);
             if ($user) {
                 AuditLog::query()->create([
                     'tenant_id' => $user->tenant_id,
@@ -67,6 +73,7 @@ class AuthController extends Controller
         }
         Auth::guard('student')->logout();
         Auth::guard('crm')->logout();
+        RateLimiter::clear($rateKey);
 
         if ($user->role_slug === 'student') {
             Auth::guard('student')->login($user, false);
