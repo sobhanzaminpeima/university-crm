@@ -93,9 +93,19 @@ class ReportController extends Controller
     {
         $rows = $this->rows($request);
         $html = ViewFacade::make('reports.pdf', ['rows' => $rows])->render();
+        if (class_exists(\Dompdf\Dompdf::class)) {
+            $dompdf = new \Dompdf\Dompdf();
+            $dompdf->loadHtml($html);
+            $dompdf->setPaper('A4', 'landscape');
+            $dompdf->render();
+            return response($dompdf->output(), 200, [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => 'attachment; filename="advanced-report.pdf"',
+            ]);
+        }
         return Response::make($html, 200, [
             'Content-Type' => 'text/html; charset=UTF-8',
-            'Content-Disposition' => 'attachment; filename="advanced-report.html"',
+            'Content-Disposition' => 'attachment; filename="advanced-report-fallback.html"',
         ]);
     }
 

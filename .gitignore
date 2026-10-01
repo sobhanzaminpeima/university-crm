@@ -1,5 +1,16 @@
 /vendor
 /node_modules
+/*.zip
+/outputs/
+/tmp/
+/database/*backup*.sql
+/docs/sql/virtuevisa_*_updated_*.sql
+/.claude/
+/cj.txt
+/loginA.html
+/loginA_headers.txt
+/storage/app/*
+!/storage/app/.gitignore
 /.env
 /storage/*.key
 /storage/logs/*.log

@@ -27,7 +27,7 @@ class ApiTokenController extends Controller
         $data = $request->validate(['name' => 'required|string|max:120']);
         $plain = 'vtk_'.Str::random(40);
 
-        DB::table('api_tokens')->insert([
+        $tokenId = DB::table('api_tokens')->insertGetId([
             'tenant_id' => $auth->tenant_id,
             'created_by' => $auth->id,
             'name' => $data['name'],
@@ -37,6 +37,7 @@ class ApiTokenController extends Controller
             'created_at' => now(),
             'updated_at' => now(),
         ]);
+        $this->audit($request, 'api_token.create', 'api_token', $tokenId, ['name' => $data['name']]);
 
         return back()->with('success', 'Token created: '.$plain.' (copy now)');
     }
@@ -48,6 +49,7 @@ class ApiTokenController extends Controller
             ->where('tenant_id', $auth->tenant_id)
             ->where('id', $id)
             ->delete();
+        $this->audit($request, 'api_token.revoke', 'api_token', $id, []);
 
         return back()->with('success', 'Token revoked.');
     }

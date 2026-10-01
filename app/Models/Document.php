@@ -17,6 +17,7 @@ class Document extends Model
         'file_url',
         'file_name',
         'status',
+        'review_note',
         'expiry_date',
         'ocr_json',
     ];

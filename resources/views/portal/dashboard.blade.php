@@ -18,6 +18,30 @@
         <div class="card"><h3>Profile Status</h3><div class="metric">{{ (int) $student->is_active === 1 ? 'Active' : 'Inactive' }}</div></div>
     </div>
     <div class="card" style="margin-top:12px;">
+        <h3>Telegram</h3>
+        @php($telegramLink = \App\Models\TelegramLink::query()->where('user_id', $student->user_id)->first())
+        @if(session('telegram_code'))
+            <div class="card" style="border-color:#0ea5e9;background:#f0f9ff;margin-bottom:10px;">
+                <p style="margin:0 0 6px;">Send this to the bot on Telegram:</p>
+                <p style="font-size:20px;font-weight:800;letter-spacing:.08em;margin:0;">/link {{ session('telegram_code') }}</p>
+                <p class="footer-note" style="margin:6px 0 0;">Expires in 10 minutes.</p>
+            </div>
+        @endif
+        @if($telegramLink)
+            <p class="footer-note">Linked to {{ $telegramLink->telegram_username ? '@'.$telegramLink->telegram_username : 'a Telegram account' }}.</p>
+            <form method="POST" action="/portal/telegram/unlink">
+                @csrf
+                <button class="secondary" type="submit">Unlink Telegram</button>
+            </form>
+        @else
+            <p class="footer-note">Link Telegram to get updates on your applications and documents.</p>
+            <form method="POST" action="/portal/telegram/generate-code">
+                @csrf
+                <button type="submit">Generate Link Code</button>
+            </form>
+        @endif
+    </div>
+    <div class="card" style="margin-top:12px;">
         <h3>Application Progress</h3>
         <div style="height:10px;background:#dbeafe;border-radius:999px;overflow:hidden;">
             <div style="height:10px;width:{{ $documentProgress }}%;background:#0284c7;"></div>

@@ -19,6 +19,7 @@ class UserController extends Controller
     public function index(Request $request): View
     {
         $user = $this->authUser($request);
+        $perPage = $this->perPage($request);
         $usersQuery = User::query()
             ->forTenant($user->tenant_id, $user->role_slug)
             ->whereNull('deleted_at');
@@ -27,8 +28,12 @@ class UserController extends Controller
                 $query->where('id', $user->id)
                     ->orWhere('parent_user_id', $user->id);
             });
+        } elseif ($user->role_slug === 'agent') {
+            $usersQuery->where('id', $user->id);
+        } elseif ($user->role_slug === 'sub_agent') {
+            $usersQuery->where('id', $user->id);
         }
-        $users = $usersQuery->latest('id')->paginate(15);
+        $users = $usersQuery->latest('id')->paginate($perPage)->withQueryString();
 
         $roles = Role::query()->where(function ($q) use ($user) {
             $q->where('tenant_id', $user->tenant_id)->orWhere('is_system', 1);
@@ -62,11 +67,13 @@ class UserController extends Controller
                 ->all();
         }
         $manageableRoleSlugs = $this->manageableRoleSlugs($user);
-        $canManagePermissions = $user->role_slug === 'super_admin';
+        $canManagePermissions = in_array($user->role_slug, ['super_admin', 'admin'], true);
+        $manageablePermissionKeys = $this->manageablePermissionKeys($user);
+        $manageablePermissionRoleSlugs = $this->manageablePermissionRoleSlugs($user);
 
         return view(
             'users.index',
-            compact('users', 'roles', 'permissions', 'rolePermissionMap', 'userPermissionMap', 'manageableRoleSlugs', 'canManagePermissions')
+            compact('users', 'roles', 'permissions', 'rolePermissionMap', 'userPermissionMap', 'manageableRoleSlugs', 'canManagePermissions', 'manageablePermissionKeys', 'manageablePermissionRoleSlugs', 'perPage')
         );
     }
 
@@ -181,19 +188,22 @@ class UserController extends Controller
     {
         $auth = $this->authUser($request);
         if ($auth->role_slug !== 'super_admin') {
-            abort(403, 'Only super admin can update role permissions.');
+            abort(403, 'Only super admin can update global role permissions.');
         }
 
         $data = $request->validate([
-            'role_slug' => 'required|string|in:admin,agent,sub_agent',
+            'role_slug' => ['required', 'string', Rule::in($this->manageablePermissionRoleSlugs($auth))],
             'permissions' => 'nullable|array',
             'permissions.*' => 'string|exists:permissions,key',
         ]);
 
         $role = Role::query()->where('slug', $data['role_slug'])->firstOrFail();
-        $permissionIds = Permission::query()->whereIn('key', $data['permissions'] ?? [])->pluck('id')->all();
-        DB::transaction(function () use ($role, $permissionIds): void {
-            DB::table('role_permissions')->where('role_id', $role->id)->delete();
+        $manageableKeys = $this->manageablePermissionKeys($auth);
+        $selectedKeys = array_values(array_intersect($data['permissions'] ?? [], $manageableKeys));
+        $permissionIds = Permission::query()->whereIn('key', $selectedKeys)->pluck('id')->all();
+        $manageableIds = Permission::query()->whereIn('key', $manageableKeys)->pluck('id')->all();
+        DB::transaction(function () use ($role, $permissionIds, $manageableIds): void {
+            DB::table('role_permissions')->where('role_id', $role->id)->whereIn('permission_id', $manageableIds)->delete();
             if (!empty($permissionIds)) {
                 $rows = array_map(fn ($permissionId) => [
                     'role_id' => $role->id,
@@ -203,6 +213,7 @@ class UserController extends Controller
                 DB::table('role_permissions')->insert($rows);
             }
         });
+        $this->audit($request, 'role.permissions.update', 'role', $role->id, ['permissions' => $selectedKeys]);
 
         return back()->with('success', 'Role permissions updated.');
     }
@@ -210,14 +221,17 @@ class UserController extends Controller
     public function updateUserPermissions(Request $request, int $id): RedirectResponse
     {
         $auth = $this->authUser($request);
-        if ($auth->role_slug !== 'super_admin') {
-            abort(403, 'Only super admin can update user permissions.');
+        if (!in_array($auth->role_slug, ['super_admin', 'admin'], true)) {
+            abort(403, 'You cannot update user permissions.');
         }
         if (!Schema::hasTable('user_permissions')) {
             return back()->withErrors(['permissions' => 'user_permissions table is missing. Apply SQL patch first.']);
         }
 
         $target = User::query()->forTenant($auth->tenant_id, $auth->role_slug)->whereNull('deleted_at')->findOrFail($id);
+        if (!in_array($target->role_slug, $this->manageablePermissionRoleSlugs($auth), true)) {
+            abort(403, 'You cannot update permissions for this role.');
+        }
         if (!in_array($target->role_slug, ['admin', 'agent', 'sub_agent'], true)) {
             return back()->withErrors(['permissions' => 'Only admin/agent/sub-agent overrides are supported.']);
         }
@@ -229,11 +243,12 @@ class UserController extends Controller
             'deny.*' => 'string|exists:permissions,key',
         ]);
 
-        $allow = array_values(array_unique($data['allow'] ?? []));
-        $deny = array_values(array_unique($data['deny'] ?? []));
+        $manageableKeys = $this->manageablePermissionKeys($auth);
+        $allow = array_values(array_intersect(array_unique($data['allow'] ?? []), $manageableKeys));
+        $deny = array_values(array_intersect(array_unique($data['deny'] ?? []), $manageableKeys));
         $deny = array_values(array_diff($deny, $allow));
 
-        DB::table('user_permissions')->where('user_id', $target->id)->delete();
+        DB::table('user_permissions')->where('user_id', $target->id)->whereIn('permission_key', $manageableKeys)->delete();
         $rows = [];
         foreach ($allow as $key) {
             $rows[] = ['user_id' => $target->id, 'permission_key' => $key, 'is_allowed' => 1, 'created_at' => now(), 'updated_at' => now()];
@@ -244,6 +259,10 @@ class UserController extends Controller
         if (!empty($rows)) {
             DB::table('user_permissions')->insert($rows);
         }
+        $this->audit($request, 'user.permissions.update', 'user', $target->id, [
+            'allow' => $allow,
+            'deny' => $deny,
+        ]);
 
         return back()->with('success', 'User-specific permissions updated.');
     }
@@ -251,11 +270,27 @@ class UserController extends Controller
     private function manageableRoleSlugs(User $user): array
     {
         return match ($user->role_slug) {
-            'super_admin' => ['admin', 'agent', 'sub_agent', 'student'],
-            'admin' => ['agent', 'sub_agent', 'student'],
+            'super_admin' => ['admin', 'agent', 'sub_agent'],
+            'admin' => ['agent', 'sub_agent'],
             'agent' => ['sub_agent'],
             default => [],
         };
+    }
+
+    private function manageablePermissionKeys(User $user): array
+    {
+        if ($user->role_slug === 'super_admin') {
+            return Permission::query()->pluck('key')->all();
+        }
+
+        return $user->role_slug === 'admin' ? ['telegram.use'] : [];
+    }
+
+    private function manageablePermissionRoleSlugs(User $user): array
+    {
+        return $user->role_slug === 'super_admin'
+            ? ['admin', 'agent', 'sub_agent']
+            : ($user->role_slug === 'admin' ? ['agent', 'sub_agent'] : []);
     }
 
     private function hasParentUserColumn(): bool

@@ -5,6 +5,7 @@ return [
     'env' => env('APP_ENV', 'production'),
     'debug' => (bool) env('APP_DEBUG', false),
     'url' => env('APP_URL', 'http://localhost'),
+    'saas_base_domain' => env('SAAS_BASE_DOMAIN', ''),
     'timezone' => 'Europe/Istanbul',
     'locale' => env('DEFAULT_LOCALE', 'en'),
     'fallback_locale' => env('FALLBACK_LOCALE', 'en'),

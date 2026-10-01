@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Payment;
 use App\Models\Student;
+use App\Models\TenantSubscription;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -15,18 +16,20 @@ class FinanceController extends Controller
         $auth = $this->authUser($request);
         $status = (string) $request->query('status', '');
         $currency = (string) $request->query('currency', '');
+        $perPage = $this->perPage($request);
 
         $payments = Payment::query()
             ->forTenant($auth->tenant_id, $auth->role_slug)
             ->when($status !== '', fn ($query) => $query->where('status', $status))
             ->when($currency !== '', fn ($query) => $query->where('currency', $currency))
             ->latest('id')
-            ->paginate(20)
+            ->paginate($perPage)
             ->withQueryString();
 
         $students = Student::query()
             ->forTenant($auth->tenant_id, $auth->role_slug)
             ->whereNull('deleted_at')
+            ->when(in_array($auth->role_slug, ['agent', 'sub_agent'], true), fn ($query) => $this->applyStudentOwnershipScope($query, $auth))
             ->orderBy('full_name')
             ->get(['id', 'full_name']);
 
@@ -36,7 +39,23 @@ class FinanceController extends Controller
             'commission' => (float) Payment::query()->forTenant($auth->tenant_id, $auth->role_slug)->sum('commission_amount'),
         ];
 
-        return view('finance.index', compact('payments', 'students', 'summary', 'status', 'currency'));
+        $saasSales = null;
+        $recentSaasSubscriptions = collect();
+        if ($auth->role_slug === 'super_admin') {
+            $saasSales = [
+                'total' => (float) TenantSubscription::query()->sum('amount'),
+                'active' => (float) TenantSubscription::query()->where('status', 'active')->sum('amount'),
+                'expired_count' => (int) TenantSubscription::query()->where('status', 'expired')->count(),
+                'active_count' => (int) TenantSubscription::query()->where('status', 'active')->count(),
+            ];
+            $recentSaasSubscriptions = TenantSubscription::query()
+                ->with(['tenant:id,name'])
+                ->latest('id')
+                ->limit(12)
+                ->get();
+        }
+
+        return view('finance.index', compact('payments', 'students', 'summary', 'status', 'currency', 'perPage', 'saasSales', 'recentSaasSubscriptions'));
     }
 
     public function store(Request $request): RedirectResponse
@@ -45,13 +64,14 @@ class FinanceController extends Controller
         $data = $request->validate([
             'student_id' => 'required|integer|exists:students,id',
             'type' => 'required|string|max:60',
-            'currency' => 'required|string|in:USD,EUR,TRY',
+            'currency' => 'required|string|in:USD,EUR,GBP,TRY',
             'amount' => 'required|numeric|min:0',
             'commission_rate' => 'nullable|numeric|min:0|max:100',
             'status' => 'required|string|in:pending,paid,failed,refunded',
             'paid_at' => 'nullable|date',
         ]);
         $data['tenant_id'] = $auth->tenant_id;
+        $this->enforceStudentOwnershipOrFail($auth, (int) $data['student_id'], 'finance.store');
         $rate = (float) ($data['commission_rate'] ?? 0);
         $data['commission_amount'] = round(((float) $data['amount']) * ($rate / 100), 2);
         if ($data['status'] === 'paid' && empty($data['paid_at'])) {
@@ -68,9 +88,10 @@ class FinanceController extends Controller
     {
         $auth = $this->authUser($request);
         $payment = Payment::query()->forTenant($auth->tenant_id, $auth->role_slug)->findOrFail($id);
+        $this->enforceStudentOwnershipOrFail($auth, (int) $payment->student_id, 'finance.update');
         $data = $request->validate([
             'type' => 'required|string|max:60',
-            'currency' => 'required|string|in:USD,EUR,TRY',
+            'currency' => 'required|string|in:USD,EUR,GBP,TRY',
             'amount' => 'required|numeric|min:0',
             'commission_rate' => 'nullable|numeric|min:0|max:100',
             'status' => 'required|string|in:pending,paid,failed,refunded',
@@ -91,10 +112,10 @@ class FinanceController extends Controller
     {
         $auth = $this->authUser($request);
         $payment = Payment::query()->forTenant($auth->tenant_id, $auth->role_slug)->findOrFail($id);
+        $this->enforceStudentOwnershipOrFail($auth, (int) $payment->student_id, 'finance.destroy');
         $payment->delete();
         $this->audit($request, 'payment.delete', 'payment', $id);
 
         return back()->with('success', 'Payment deleted.');
     }
 }
-

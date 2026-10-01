@@ -3,20 +3,22 @@
 @section('content')
 <div class="card">
     <h2 style="margin-top:0;">My Documents</h2>
+    <p class="footer-note">Documents are uploaded by your assigned agent. You can view status and download files here.</p>
     <table>
-        <thead><tr><th>Type</th><th>File</th><th>Uploaded At</th><th>Status</th><th>Expiry</th><th>Action</th></tr></thead>
+        <thead><tr><th>Type</th><th>File</th><th>Status</th></tr></thead>
         <tbody>
         @foreach($documents as $d)
             <tr>
                 <td>{{ $d->label }}</td>
                 <td>
                     @if(!$d->is_missing)
-                        <a href="{{ $d->file_url }}" target="_blank">{{ $d->file_name }}</a>
+                        <a href="/portal/documents/{{ $d->id }}/view" target="_blank">Preview</a>
+                        <span class="footer-note">|</span>
+                        <a href="/portal/documents/{{ $d->id }}/view?download=1" target="_blank">Download</a>
                     @else
                         <span class="footer-note">Missing</span>
                     @endif
                 </td>
-                <td>{{ $d->uploaded_at ?: '-' }}</td>
                 <td>
                     @if($d->is_missing)
                         <span class="badge rejected">Missing</span>
@@ -26,19 +28,32 @@
                         <span class="badge applied">Uploaded</span>
                     @endif
                 </td>
-                <td>{{ $d->expiry_date ?: '-' }}</td>
-                <td>
-                    <form method="POST" action="/portal/documents" enctype="multipart/form-data">
-                        @csrf
-                        <input type="hidden" name="type" value="{{ $d->type }}">
-                        <input type="file" name="file" required>
-                        <input type="date" name="expiry_date">
-                        <button>Upload</button>
-                    </form>
-                </td>
             </tr>
         @endforeach
         </tbody>
     </table>
+
+    <div class="card" style="margin-top:12px;">
+        <h3>Acceptance Letters</h3>
+        <table>
+            <thead><tr><th>Title</th><th>Date</th><th>File</th></tr></thead>
+            <tbody>
+            @forelse($offerLetters as $letter)
+                @php($meta = json_decode((string) $letter->ocr_json, true) ?: [])
+                <tr>
+                    <td>{{ $meta['title'] ?? 'Acceptance Letter' }}</td>
+                    <td>{{ $meta['letter_date'] ?? '-' }}</td>
+                    <td>
+                        <a href="/portal/documents/{{ $letter->id }}/view" target="_blank">Preview</a>
+                        <span class="footer-note">|</span>
+                        <a href="/portal/documents/{{ $letter->id }}/view?download=1" target="_blank">Download</a>
+                    </td>
+                </tr>
+            @empty
+                <tr><td colspan="3">No acceptance letter has been shared yet.</td></tr>
+            @endforelse
+            </tbody>
+        </table>
+    </div>
 </div>
 @endsection

@@ -12,11 +12,14 @@ class University extends Model
 
     protected $fillable = [
         'tenant_id',
+        'created_by_user_id',
         'name',
         'country',
         'city',
         'institution_type',
         'website',
+        'logo_url',
+        'image_url',
         'currency',
         'tuition_range',
         'language',

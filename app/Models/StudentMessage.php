@@ -16,6 +16,8 @@ class StudentMessage extends Model
         'recipient_user_id',
         'sender_role',
         'body',
+        'attachment_url',
+        'attachment_name',
         'read_at',
     ];
 }

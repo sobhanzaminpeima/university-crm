@@ -8,6 +8,14 @@
         <a class="tab {{ $status === 'pending' ? 'active' : '' }}" href="/student-requests?status=pending">Pending ({{ $pendingCount }})</a>
         <a class="tab {{ $status === 'processed' ? 'active' : '' }}" href="/student-requests?status=processed">Processed ({{ $processedCount }})</a>
     </div>
+    <form method="GET" action="/student-requests" class="toolbar" style="margin:10px 0;">
+        <input type="hidden" name="status" value="{{ $status }}">
+        <select name="per_page" class="per-page-select" title="Items per page" aria-label="Items per page" onchange="this.form.submit()">
+            @foreach([15, 50, 100] as $size)
+                <option value="{{ $size }}" {{ (int)($perPage ?? 50) === $size ? 'selected' : '' }}>{{ $size }}</option>
+            @endforeach
+        </select>
+    </form>
     <table class="table-compact">
         <thead><tr><th>Name</th><th>Email</th><th>Target Program</th><th>Nationality</th><th>Status</th><th>Action</th></tr></thead>
         <tbody>
@@ -38,6 +46,6 @@
         @endforeach
         </tbody>
     </table>
-    <div style="margin-top:10px;">{{ $requests->links() }}</div>
+    <div class="pagination-wrap">{{ $requests->links() }}</div>
 </div>
 @endsection

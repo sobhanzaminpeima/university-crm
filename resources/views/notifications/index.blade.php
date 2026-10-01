@@ -4,6 +4,13 @@
 <div class="card">
     <div class="toolbar">
         <h2 style="margin:0;">Notification Center</h2>
+        <form method="GET" action="/notifications" class="toolbar" style="margin:0;">
+            <select name="per_page" class="per-page-select" title="Items per page" aria-label="Items per page" onchange="this.form.submit()">
+                @foreach([15, 50, 100] as $size)
+                    <option value="{{ $size }}" {{ (int)($perPage ?? 50) === $size ? 'selected' : '' }}>{{ $size }}</option>
+                @endforeach
+            </select>
+        </form>
         <form method="POST" action="/notifications/read-all">
             @csrf
             <button class="secondary" type="submit">Mark all as read</button>
@@ -41,6 +48,6 @@
         <p class="footer-note">No notifications found.</p>
     @endforelse
 
-    <div style="margin-top:10px;">{{ $notifications->links() }}</div>
+    <div class="pagination-wrap">{{ $notifications->links() }}</div>
 </div>
 @endsection

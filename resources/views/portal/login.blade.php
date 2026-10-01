@@ -18,9 +18,6 @@
         <input type="password" name="password" placeholder="Password" required style="width:100%;margin-bottom:10px;">
         <button style="width:100%;">Login</button>
     </form>
-    <p class="footer-note" style="margin-top:10px;">
-        Demo: <strong>priya@example.com</strong> / <strong>Student123!</strong>
-    </p>
 </div>
 </body>
 </html>

@@ -17,13 +17,24 @@ class StudentRequestController extends Controller
     {
         $user = $this->authUser($request);
         $status = (string) $request->query('status', 'pending');
-        $pendingCount = StudentRequest::query()->forTenant($user->tenant_id, $user->role_slug)->where('status', 'pending')->count();
-        $processedCount = StudentRequest::query()->forTenant($user->tenant_id, $user->role_slug)->whereIn('status', ['approved', 'rejected'])->count();
-        $requests = StudentRequest::query()
-            ->forTenant($user->tenant_id, $user->role_slug)
+        $perPage = $this->perPage($request);
+        $baseQuery = StudentRequest::query()->forTenant($user->tenant_id, $user->role_slug);
+        if (in_array($user->role_slug, ['agent', 'sub_agent'], true) && !$user->hasPermission('student_requests.view_all')) {
+            $baseQuery->whereIn('email', function ($sub) use ($user) {
+                $sub->select('email')
+                    ->from('students')
+                    ->where('tenant_id', $user->tenant_id)
+                    ->whereNull('deleted_at')
+                    ->when($user->role_slug === 'agent', fn ($q) => $q->where('agent_id', $user->id))
+                    ->when($user->role_slug === 'sub_agent', fn ($q) => $q->where('sub_agent_id', $user->id));
+            });
+        }
+        $pendingCount = (clone $baseQuery)->where('status', 'pending')->count();
+        $processedCount = (clone $baseQuery)->whereIn('status', ['approved', 'rejected'])->count();
+        $requests = (clone $baseQuery)
             ->when($status === 'processed', fn ($q) => $q->whereIn('status', ['approved', 'rejected']), fn ($q) => $q->where('status', 'pending'))
             ->latest('id')
-            ->paginate(20)
+            ->paginate($perPage)
             ->withQueryString();
         $agents = User::query()
             ->forTenant($user->tenant_id, $user->role_slug)
@@ -32,15 +43,26 @@ class StudentRequestController extends Controller
             ->orderBy('name')
             ->get(['id', 'name', 'role_slug']);
 
-        return view('requests.index', compact('requests', 'status', 'pendingCount', 'processedCount', 'agents'));
+        return view('requests.index', compact('requests', 'status', 'pendingCount', 'processedCount', 'agents', 'perPage'));
     }
 
     public function show(Request $request, int $id): View
     {
         $user = $this->authUser($request);
-        $requestItem = StudentRequest::query()
+        $query = StudentRequest::query()
             ->forTenant($user->tenant_id, $user->role_slug)
-            ->findOrFail($id);
+            ->where('id', $id);
+        if (in_array($user->role_slug, ['agent', 'sub_agent'], true) && !$user->hasPermission('student_requests.view_all')) {
+            $query->whereIn('email', function ($sub) use ($user) {
+                $sub->select('email')
+                    ->from('students')
+                    ->where('tenant_id', $user->tenant_id)
+                    ->whereNull('deleted_at')
+                    ->when($user->role_slug === 'agent', fn ($q) => $q->where('agent_id', $user->id))
+                    ->when($user->role_slug === 'sub_agent', fn ($q) => $q->where('sub_agent_id', $user->id));
+            });
+        }
+        $requestItem = $query->firstOrFail();
 
         return view('requests.show', compact('requestItem'));
     }
@@ -48,15 +70,39 @@ class StudentRequestController extends Controller
     public function approve(Request $request, int $id): RedirectResponse
     {
         $user = $this->authUser($request);
-        $requestItem = StudentRequest::query()->forTenant($user->tenant_id, $user->role_slug)->where('status', 'pending')->findOrFail($id);
+        $query = StudentRequest::query()->forTenant($user->tenant_id, $user->role_slug)->where('status', 'pending')->where('id', $id);
+        if (in_array($user->role_slug, ['agent', 'sub_agent'], true) && !$user->hasPermission('student_requests.view_all')) {
+            $query->whereIn('email', function ($sub) use ($user) {
+                $sub->select('email')
+                    ->from('students')
+                    ->where('tenant_id', $user->tenant_id)
+                    ->whereNull('deleted_at')
+                    ->when($user->role_slug === 'agent', fn ($q) => $q->where('agent_id', $user->id))
+                    ->when($user->role_slug === 'sub_agent', fn ($q) => $q->where('sub_agent_id', $user->id));
+            });
+        }
+        $requestItem = $query->firstOrFail();
         $payload = $request->validate([
             'assigned_to' => 'nullable|integer|exists:users,id',
             'note' => 'nullable|string|max:3000',
         ]);
 
+        $assignedAgentId = null;
+        if (!empty($payload['assigned_to'])) {
+            $assignedAgent = User::query()
+                ->forTenant($user->tenant_id, $user->role_slug)
+                ->whereIn('role_slug', ['agent', 'sub_agent'])
+                ->whereNull('deleted_at')
+                ->find((int) $payload['assigned_to']);
+            if (!$assignedAgent) {
+                abort(422, 'Invalid agent selected.');
+            }
+            $assignedAgentId = $assignedAgent->id;
+        }
+
         $student = Student::query()->create([
             'tenant_id' => $user->tenant_id,
-            'agent_id' => !empty($payload['assigned_to']) ? (int) $payload['assigned_to'] : null,
+            'agent_id' => $assignedAgentId,
             'full_name' => $requestItem->full_name,
             'email' => $requestItem->email,
             'phone' => $requestItem->phone,
@@ -106,7 +152,18 @@ class StudentRequestController extends Controller
     public function reject(Request $request, int $id): RedirectResponse
     {
         $user = $this->authUser($request);
-        $requestItem = StudentRequest::query()->forTenant($user->tenant_id, $user->role_slug)->where('status', 'pending')->findOrFail($id);
+        $query = StudentRequest::query()->forTenant($user->tenant_id, $user->role_slug)->where('status', 'pending')->where('id', $id);
+        if (in_array($user->role_slug, ['agent', 'sub_agent'], true) && !$user->hasPermission('student_requests.view_all')) {
+            $query->whereIn('email', function ($sub) use ($user) {
+                $sub->select('email')
+                    ->from('students')
+                    ->where('tenant_id', $user->tenant_id)
+                    ->whereNull('deleted_at')
+                    ->when($user->role_slug === 'agent', fn ($q) => $q->where('agent_id', $user->id))
+                    ->when($user->role_slug === 'sub_agent', fn ($q) => $q->where('sub_agent_id', $user->id));
+            });
+        }
+        $requestItem = $query->firstOrFail();
         $requestItem->update([
             'status' => 'rejected',
             'processed_by' => $user->id,

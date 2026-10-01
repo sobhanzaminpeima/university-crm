@@ -24,6 +24,7 @@ class CrmMessageController extends Controller
         $students = Student::query()
             ->forTenant($auth->tenant_id, $auth->role_slug)
             ->whereNull('deleted_at')
+            ->when(in_array($auth->role_slug, ['agent', 'sub_agent'], true) && !$auth->hasPermission('students.view_all'), fn ($query) => $this->applyStudentOwnershipScope($query, $auth))
             ->orderBy('full_name')
             ->get(['id', 'full_name']);
 
@@ -33,6 +34,7 @@ class CrmMessageController extends Controller
 
         $messages = collect();
         if ($selectedStudent) {
+            $this->enforceStudentOwnershipOrFail($auth, (int) $selectedStudent->id, 'messages.index');
             $messages = StudentMessage::query()
                 ->forTenant($auth->tenant_id, $auth->role_slug)
                 ->where('student_id', $selectedStudent->id)
@@ -54,12 +56,14 @@ class CrmMessageController extends Controller
         $data = $request->validate([
             'student_id' => 'required|integer|exists:students,id',
             'body' => 'required|string|min:2|max:4000',
+            'attachment' => 'nullable|file|mimes:pdf,jpg,jpeg,png,doc,docx,xls,xlsx,zip|max:10240',
         ]);
 
         $student = Student::query()
             ->forTenant($auth->tenant_id, $auth->role_slug)
             ->whereNull('deleted_at')
             ->findOrFail((int) $data['student_id']);
+        $this->enforceStudentOwnershipOrFail($auth, (int) $student->id, 'messages.send');
 
         $studentUser = null;
         if ($student->user_id) {
@@ -72,14 +76,20 @@ class CrmMessageController extends Controller
             return back()->withErrors(['body' => 'Student portal account was not found.']);
         }
 
-        $message = StudentMessage::query()->create([
+        $payload = [
             'tenant_id' => $auth->tenant_id,
             'student_id' => $student->id,
             'student_user_id' => $studentUser->id,
             'recipient_user_id' => $studentUser->id,
-            'sender_role' => 'admin',
+            'sender_role' => $auth->role_slug,
             'body' => $data['body'],
-        ]);
+        ];
+        if ($request->hasFile('attachment')) {
+            $path = $request->file('attachment')->store('messages', 'public');
+            $payload['attachment_url'] = '/storage/'.$path;
+            $payload['attachment_name'] = $request->file('attachment')->getClientOriginalName();
+        }
+        $message = StudentMessage::query()->create($payload);
 
         Notification::query()->create([
             'tenant_id' => $auth->tenant_id,
@@ -93,4 +103,3 @@ class CrmMessageController extends Controller
         return back()->with('success', 'Message sent to student.');
     }
 }
-

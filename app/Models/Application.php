@@ -18,6 +18,7 @@ class Application extends Model
         'intake',
         'status',
         'deadline',
+        'next_followup_at',
         'notes',
         'enroll_probability',
         'best_next_action',

@@ -10,6 +10,7 @@ class Kernel extends ConsoleKernel
     protected function schedule(Schedule $schedule): void
     {
         $schedule->command('crm:sla-check')->hourly();
+        $schedule->command('crm:deadline-reminders')->dailyAt('08:00');
     }
 
     protected function commands(): void

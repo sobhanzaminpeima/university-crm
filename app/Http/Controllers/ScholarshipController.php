@@ -14,25 +14,46 @@ class ScholarshipController extends Controller
     {
         $user = $this->authUser($request);
         $q = (string) $request->query('q', '');
+        $country = trim((string) $request->query('country', ''));
+        $universityId = (int) $request->query('university_id', 0);
+        $dateFrom = trim((string) $request->query('date_from', ''));
+        $dateTo = trim((string) $request->query('date_to', ''));
+        $sort = (string) $request->query('sort', 'created_desc');
+        $perPage = $this->perPage($request);
 
         $scholarships = Scholarship::query()
+            ->select('scholarships.*')
             ->forTenant($user->tenant_id, $user->role_slug)
+            ->leftJoin('universities', function ($join) use ($user) {
+                $join->on('universities.id', '=', 'scholarships.university_id')
+                    ->where('universities.tenant_id', '=', $user->tenant_id);
+            })
             ->when($q !== '', fn ($query) => $query->where(function ($sub) use ($q) {
-                $sub->where('title', 'like', "%{$q}%")
-                    ->orWhere('description', 'like', "%{$q}%");
+                $sub->where('scholarships.title', 'like', "%{$q}%")
+                    ->orWhere('scholarships.description', 'like', "%{$q}%")
+                    ->orWhere('universities.name', 'like', "%{$q}%");
             }))
-            ->latest('id')
-            ->paginate(15)
+            ->when($country !== '', fn ($query) => $query->where('universities.country', $country))
+            ->when($universityId > 0, fn ($query) => $query->where('scholarships.university_id', $universityId))
+            ->when($dateFrom !== '', fn ($query) => $query->whereDate('scholarships.created_at', '>=', $dateFrom))
+            ->when($dateTo !== '', fn ($query) => $query->whereDate('scholarships.created_at', '<=', $dateTo))
+            ->when($sort === 'title_asc', fn ($query) => $query->orderBy('scholarships.title')->orderBy('scholarships.id'))
+            ->when($sort === 'title_desc', fn ($query) => $query->orderByDesc('scholarships.title')->orderByDesc('scholarships.id'))
+            ->when($sort === 'university_asc', fn ($query) => $query->orderBy('universities.name')->orderBy('scholarships.title'))
+            ->when($sort === 'created_asc', fn ($query) => $query->orderBy('scholarships.created_at')->orderBy('scholarships.id'))
+            ->when(!in_array($sort, ['title_asc', 'title_desc', 'university_asc', 'created_asc'], true), fn ($query) => $query->orderByDesc('scholarships.created_at')->orderByDesc('scholarships.id'))
+            ->paginate($perPage)
             ->withQueryString();
 
         $universities = University::query()
             ->forTenant($user->tenant_id, $user->role_slug)
             ->orderBy('name')
             ->get();
+        $countryOptions = $universities->pluck('country')->filter()->unique()->sort()->values()->all();
 
         $uniMap = $universities->keyBy('id');
 
-        return view('scholarships.index', compact('scholarships', 'universities', 'uniMap', 'q'));
+        return view('scholarships.index', compact('scholarships', 'universities', 'uniMap', 'countryOptions', 'q', 'country', 'universityId', 'dateFrom', 'dateTo', 'sort', 'perPage'));
     }
 
     public function store(Request $request): RedirectResponse

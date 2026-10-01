@@ -10,8 +10,10 @@ use App\Models\StudentMessage;
 use App\Models\Student;
 use App\Models\University;
 use App\Models\User;
+use App\Models\Tenant;
 use App\Services\StudentDocumentService;
 use App\Services\UniversityMatchingService;
+use App\Services\WhatsappNotificationService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\RedirectResponse;
@@ -19,13 +21,23 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\View\View;
 
 class PortalWebController extends Controller
 {
+    private const DEGREE_ALIASES = [
+        'Diploma' => ['Diploma', 'High School Diploma', 'دیپلم'],
+        'Associate' => ['Associate', 'Associate Degree', 'فوق دیپلم', 'کاردانی'],
+        'Bachelor' => ['Bachelor', 'BSc', 'BA', 'کارشناسی', 'لیسانس'],
+        'Master' => ['Master', 'MSc', 'MA', 'کارشناسی ارشد', 'فوق لیسانس'],
+        'PhD' => ['PhD', 'Doctorate', 'دکتری', 'دکترا'],
+    ];
+
     public function __construct(
         private readonly StudentDocumentService $documentService,
-        private readonly UniversityMatchingService $matchingService
+        private readonly UniversityMatchingService $matchingService,
+        private readonly WhatsappNotificationService $whatsapp
     ) {
     }
 
@@ -79,17 +91,19 @@ class PortalWebController extends Controller
         }
 
         $passwordOk = $user ? Hash::check($data['password'], (string) $user->password) : false;
-        // Transitional support for legacy installs that stored plain-text passwords.
-        if (!$passwordOk && $user && hash_equals((string) $user->password, (string) $data['password'])) {
-            $user->password = Hash::make((string) $data['password']);
-            $user->save();
-            $passwordOk = true;
-        }
 
         if ($user && !(bool) $user->is_active) {
             return back()
                 ->withInput($request->except('password'))
                 ->withErrors(['login' => 'Your student account is inactive. Please contact admin.']);
+        }
+        if ($user) {
+            $tenant = Tenant::query()->find($user->tenant_id);
+            if (!$tenant || (int) ($tenant->is_active ?? 1) !== 1 || (string) ($tenant->subscription_status ?? 'active') !== 'active') {
+                return back()
+                    ->withInput($request->except('password'))
+                    ->withErrors(['login' => 'Portal is not active for your company yet.']);
+            }
         }
 
         if (!$user || !$passwordOk) {
@@ -100,6 +114,7 @@ class PortalWebController extends Controller
         Auth::guard('crm')->logout();
         Auth::guard('student')->login($user, false);
         $request->session()->regenerate();
+        $request->session()->regenerateToken();
 
         return redirect('/portal/dashboard');
     }
@@ -131,6 +146,7 @@ class PortalWebController extends Controller
         $universityType = trim((string) $request->query('university_type', ''));
         $universityName = trim((string) $request->query('university_name', ''));
         $degree = trim((string) $request->query('degree', ''));
+        $degree = $this->normalizeDegreeLabel($degree) ?: $degree;
         $studyField = trim((string) $request->query('study_field', ''));
         $hasCityColumn = Schema::hasColumn('universities', 'city');
         $hasTypeColumn = Schema::hasColumn('universities', 'institution_type');
@@ -138,9 +154,16 @@ class PortalWebController extends Controller
 
         $programUniversityIds = null;
         if ($hasProgramsTable && ($degree !== '' || $studyField !== '')) {
+            $degreeAliases = $this->degreeAliasesForFilter($degree);
             $programUniversityIds = DB::table('university_programs')
                 ->where('tenant_id', $user->tenant_id)
-                ->when($degree !== '', fn ($query) => $query->where('degree_level', 'like', "%{$degree}%"))
+                ->when($degree !== '', function ($query) use ($degreeAliases) {
+                    $query->where(function ($sub) use ($degreeAliases) {
+                        foreach ($degreeAliases as $alias) {
+                            $sub->orWhere('degree_level', 'like', "%{$alias}%");
+                        }
+                    });
+                })
                 ->when($studyField !== '', fn ($query) => $query->where('program_name', 'like', "%{$studyField}%"))
                 ->distinct()
                 ->pluck('university_id')
@@ -233,7 +256,7 @@ class PortalWebController extends Controller
 
         $degreeOptions = [];
         if ($hasProgramsTable) {
-            $degreeOptions = DB::table('university_programs')
+            $rawDegreeOptions = DB::table('university_programs')
                 ->where('tenant_id', $user->tenant_id)
                 ->whereNotNull('degree_level')
                 ->where('degree_level', '!=', '')
@@ -242,9 +265,10 @@ class PortalWebController extends Controller
                 ->pluck('degree_level')
                 ->values()
                 ->all();
+            $degreeOptions = $this->normalizeDegreeOptions($rawDegreeOptions);
         }
         if (empty($degreeOptions)) {
-            $degreeOptions = ['Bachelor', 'Master', 'PhD', 'Diploma', 'Foundation'];
+            $degreeOptions = $this->defaultDegreeOptions();
         }
 
         $studyFieldOptions = [];
@@ -287,6 +311,41 @@ class PortalWebController extends Controller
         ));
     }
 
+    private function normalizeDegreeOptions(array $raw): array
+    {
+        return $this->defaultDegreeOptions();
+    }
+
+    private function normalizeDegreeLabel(string $value): string
+    {
+        $needle = mb_strtolower(trim($value));
+        if ($needle === '') {
+            return '';
+        }
+        foreach (self::DEGREE_ALIASES as $target => $aliases) {
+            foreach ($aliases as $alias) {
+                if (str_contains($needle, mb_strtolower($alias))) {
+                    return $target;
+                }
+            }
+        }
+        return '';
+    }
+
+    private function degreeAliasesForFilter(string $selected): array
+    {
+        $label = $this->normalizeDegreeLabel($selected);
+        if ($label === '' || !isset(self::DEGREE_ALIASES[$label])) {
+            return [$selected];
+        }
+        return self::DEGREE_ALIASES[$label];
+    }
+
+    private function defaultDegreeOptions(): array
+    {
+        return ['Diploma', 'Associate', 'Bachelor', 'Master', 'PhD'];
+    }
+
     public function applications(Request $request): View
     {
         $user = $this->authUser($request);
@@ -300,42 +359,37 @@ class PortalWebController extends Controller
         $user = $this->authUser($request);
         $student = $this->studentForUser($user);
         $documents = $this->documentService->requiredRows($user->tenant_id, $student->id);
-        return view('portal.documents', compact('documents', 'student'));
+        $offerLetters = Document::query()
+            ->where('tenant_id', $user->tenant_id)
+            ->where('student_id', $student->id)
+            ->where('type', 'acceptance_letter')
+            ->orderByDesc('id')
+            ->get();
+        return view('portal.documents', compact('documents', 'student', 'offerLetters'));
     }
 
     public function uploadDocument(Request $request): RedirectResponse
     {
+        return back()->withErrors(['documents' => 'Students cannot upload documents directly. Please contact your agent.']);
+    }
+
+    public function viewDocument(Request $request, int $documentId)
+    {
         $user = $this->authUser($request);
         $student = $this->studentForUser($user);
-        $data = $request->validate([
-            'type' => 'required|string|in:passport,diploma,transcript,english_certificate,photo,other_documents,payment_receipt',
-            'file' => 'required|file|mimes:pdf,jpg,jpeg,png|max:5120',
-            'expiry_date' => 'nullable|date',
-        ]);
-        $path = $request->file('file')->store('docs', 'public');
         $document = Document::query()
             ->where('tenant_id', $user->tenant_id)
             ->where('student_id', $student->id)
-            ->where('type', $data['type'])
-            ->latest('id')
-            ->first();
-
-        $payload = [
-            'tenant_id' => $user->tenant_id,
-            'student_id' => $student->id,
-            'type' => $data['type'],
-            'file_url' => '/storage/'.$path,
-            'file_name' => basename($path),
-            'status' => 'uploaded',
-            'expiry_date' => $data['expiry_date'] ?? null,
-        ];
-        if ($document) {
-            $document->update($payload);
-        } else {
-            Document::query()->create($payload);
+            ->findOrFail($documentId);
+        $relative = ltrim((string) str_replace('/storage/', '', (string) $document->file_url), '/');
+        if (!Storage::disk('public')->exists($relative)) {
+            abort(404, 'Document file not found on server.');
+        }
+        if ($request->boolean('download')) {
+            return Storage::disk('public')->download($relative, $document->file_name ?: basename($relative));
         }
 
-        return back()->with('success', 'Document uploaded');
+        return response()->file(Storage::disk('public')->path($relative));
     }
 
     public function applyToUniversity(Request $request): RedirectResponse
@@ -395,6 +449,11 @@ class PortalWebController extends Controller
                 ]),
             ]);
         }
+        $this->whatsapp->notifyTenant(
+            $user->tenant_id,
+            'application_update',
+            'New portal request: '.$student->full_name.' requested '.$payloadProgram
+        );
 
         return back()->with('success', 'Your request was sent to admin for review.');
     }
@@ -423,6 +482,7 @@ class PortalWebController extends Controller
         $student = $this->studentForUser($user);
         $data = $request->validate([
             'message' => 'required|string|min:3|max:4000',
+            'attachment' => 'nullable|file|mimes:pdf,jpg,jpeg,png,doc,docx,xls,xlsx,zip|max:10240',
         ]);
 
         $recipient = User::query()
@@ -432,14 +492,20 @@ class PortalWebController extends Controller
             ->orderByRaw("FIELD(role_slug, 'agent', 'admin', 'super_admin')")
             ->first();
 
-        $row = StudentMessage::query()->create([
+        $payload = [
             'tenant_id' => $user->tenant_id,
             'student_id' => $student->id,
             'student_user_id' => $user->id,
             'recipient_user_id' => $recipient?->id,
             'sender_role' => 'student',
             'body' => $data['message'],
-        ]);
+        ];
+        if ($request->hasFile('attachment')) {
+            $path = $request->file('attachment')->store('messages', 'public');
+            $payload['attachment_url'] = '/storage/'.$path;
+            $payload['attachment_name'] = $request->file('attachment')->getClientOriginalName();
+        }
+        $row = StudentMessage::query()->create($payload);
 
         if ($recipient) {
             Notification::query()->create([
@@ -451,6 +517,11 @@ class PortalWebController extends Controller
                 'meta_json' => json_encode(['message_id' => $row->id, 'student_id' => $student->id]),
             ]);
         }
+        $this->whatsapp->notifyTenant(
+            $user->tenant_id,
+            'application_update',
+            'New student message from '.$student->full_name
+        );
 
         return back()->with('success', 'Message sent.');
     }

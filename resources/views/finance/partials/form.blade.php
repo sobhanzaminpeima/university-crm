@@ -11,7 +11,7 @@
     @endif
     <input name="type" placeholder="Type (tuition/deposit/...)" value="{{ old('type', $payment?->type) }}" required>
     <select name="currency" required>
-        @foreach(['USD','EUR','TRY'] as $cur)
+        @foreach(['USD','EUR','GBP','TRY'] as $cur)
             <option value="{{ $cur }}" {{ old('currency', $payment?->currency ?? 'USD') === $cur ? 'selected' : '' }}>{{ $cur }}</option>
         @endforeach
     </select>
@@ -25,4 +25,3 @@
     </select>
     <input name="paid_at" type="datetime-local" value="{{ old('paid_at', $payment?->paid_at ? \Illuminate\Support\Carbon::parse($payment->paid_at)->format('Y-m-d\TH:i') : '') }}">
 </div>
-

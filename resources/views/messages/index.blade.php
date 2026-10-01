@@ -1,6 +1,7 @@
 @extends('layouts.app')
 
 @section('content')
+<div class="page-shell">
 <div class="two-col">
     <div class="card">
         <h2 style="margin-top:0;">Student Conversations</h2>
@@ -23,10 +24,11 @@
         <h2 style="margin-top:0;">Thread</h2>
         @if($selectedStudent)
             <p><strong>Student:</strong> {{ $selectedStudent->full_name }}</p>
-            <form method="POST" action="/messages">
+            <form method="POST" action="/messages" enctype="multipart/form-data">
                 @csrf
                 <input type="hidden" name="student_id" value="{{ $selectedStudent->id }}">
                 <textarea name="body" rows="4" style="width:100%;" placeholder="Write a message..." required></textarea>
+                <input type="file" name="attachment" style="margin-top:8px;">
                 <button type="submit" style="margin-top:8px;">Send</button>
             </form>
             <div style="margin-top:12px;">
@@ -37,6 +39,9 @@
                             <span class="footer-note">{{ $message->created_at }}</span>
                         </div>
                         <div>{{ $message->body }}</div>
+                        @if(!empty($message->attachment_url))
+                            <div style="margin-top:6px;"><a class="tab" href="{{ $message->attachment_url }}" target="_blank">Attachment: {{ $message->attachment_name ?: 'download' }}</a></div>
+                        @endif
                     </div>
                 @empty
                     <p class="footer-note">No messages in this thread.</p>
@@ -48,5 +53,5 @@
         @endif
     </div>
 </div>
+ </div>
 @endsection
-

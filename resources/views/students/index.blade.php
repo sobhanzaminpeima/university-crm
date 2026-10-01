@@ -1,19 +1,25 @@
 @extends('layouts.app')
 
 @section('content')
+<div class="page-shell">
 <div class="card">
     <div class="toolbar">
         <form id="searchForm" method="GET" action="/students" class="toolbar grow">
             <input id="global-search" type="text" name="q" placeholder="Search name, email, phone, field..." value="{{ $q }}">
             <select name="stage">
                 <option value="">All stages</option>
-                @foreach(['lead','applied','offered','accepted','enrolled'] as $st)
+                @foreach(['lead','inquiry','applicant','documents_pending','interview_scheduled','admitted','visa_process','tuition_paid','enrolled','alumni'] as $st)
                     <option value="{{ $st }}" {{ $stage === $st ? 'selected' : '' }}>{{ ucfirst($st) }}</option>
                 @endforeach
             </select>
             <input name="country" placeholder="Target country" value="{{ $country }}">
             <input name="gpa_min" type="number" step="0.01" min="0" max="4" placeholder="GPA min" value="{{ $gpaMin }}">
             <input name="gpa_max" type="number" step="0.01" min="0" max="4" placeholder="GPA max" value="{{ $gpaMax }}">
+            <select name="per_page" class="per-page-select" title="Items per page" aria-label="Items per page" onchange="this.form.submit()">
+                @foreach([15, 50, 100] as $size)
+                    <option value="{{ $size }}" {{ (int)($perPage ?? 50) === $size ? 'selected' : '' }}>{{ $size }}</option>
+                @endforeach
+            </select>
             <button type="submit">Search</button>
         </form>
         <button onclick="document.getElementById('addStudent').showModal()">+ Add Student</button>
@@ -22,7 +28,7 @@
     <table class="table-compact">
         <thead>
         <tr>
-            <th>Student</th><th>Nationality</th><th>GPA</th><th>Field</th><th>Agent</th><th>Sub-Agent</th><th>Stage</th><th>Actions</th>
+            <th>Student</th><th>Nationality</th><th>GPA</th><th>Field of Study</th><th>Lead Source</th><th>Uni Lang</th><th>Agent</th><th>Sub-Agent</th><th>Stage</th><th>Actions</th>
         </tr>
         </thead>
         <tbody>
@@ -32,6 +38,8 @@
                 <td>{{ $student->nationality ?: '-' }}</td>
                 <td>{{ $student->gpa ?: '-' }}</td>
                 <td>{{ $student->field_of_study ?: '-' }}</td>
+                <td>{{ $student->lead_source ? ucwords(str_replace('_', ' ', $student->lead_source)) : '-' }}</td>
+                <td>{{ strtoupper($student->preferred_university_language ?: '-') }}</td>
                 <td>{{ $student->agent?->name ?: '-' }}</td>
                 <td>{{ $student->subAgent?->name ?: '-' }}</td>
                 <td><span class="badge {{ $student->stage }}">{{ ucfirst($student->stage) }}</span></td>
@@ -47,7 +55,7 @@
         @endforeach
         </tbody>
     </table>
-    <div style="margin-top:10px;">{{ $students->links() }}</div>
+    <div class="pagination-wrap">{{ $students->links() }}</div>
 </div>
 
 @foreach($students as $student)
@@ -63,14 +71,35 @@
             <input name="phone" value="{{ $student->phone }}">
             <input name="nationality" value="{{ $student->nationality }}">
             <input name="gpa" value="{{ $student->gpa }}">
-            <input name="field_of_study" value="{{ $student->field_of_study }}">
+            <select name="field_of_study">
+                <option value="">Field of Study</option>
+                @foreach(($studyFields ?? collect()) as $field)
+                    <option value="{{ $field }}" {{ (string)$student->field_of_study === (string)$field ? 'selected' : '' }}>{{ $field }}</option>
+                @endforeach
+            </select>
+            <select name="preferred_university_language">
+                <option value="">University language</option>
+                <option value="en" {{ ($student->preferred_university_language ?? '') === 'en' ? 'selected' : '' }}>English</option>
+                <option value="tr" {{ ($student->preferred_university_language ?? '') === 'tr' ? 'selected' : '' }}>Turkish</option>
+            </select>
             <input name="english_level" value="{{ $student->english_level }}">
             <select name="stage">
-                @foreach(['lead','applied','offered','accepted','enrolled'] as $st)
+                @foreach(['lead','inquiry','applicant','documents_pending','interview_scheduled','admitted','visa_process','tuition_paid','enrolled','alumni'] as $st)
                     <option value="{{ $st }}" {{ $student->stage === $st ? 'selected' : '' }}>{{ ucfirst($st) }}</option>
                 @endforeach
             </select>
+            <select name="lifecycle_stage">
+                @foreach(['lead','inquiry','applicant','admitted','enrolled','alumni'] as $lc)
+                    <option value="{{ $lc }}" {{ ($student->lifecycle_stage ?? '') === $lc ? 'selected' : '' }}>{{ ucfirst($lc) }}</option>
+                @endforeach
+            </select>
             <input name="target_country" value="{{ $student->target_country }}">
+            <select name="lead_source">
+                <option value="">Lead Source</option>
+                @foreach(['website_form','landing_page','meta_ads','google_ads','whatsapp','instagram','telegram','email','phone_call','education_fair','referral','walk_in','other'] as $src)
+                    <option value="{{ $src }}" {{ ($student->lead_source ?? '') === $src ? 'selected' : '' }}>{{ ucwords(str_replace('_',' ', $src)) }}</option>
+                @endforeach
+            </select>
             <input name="budget_usd" value="{{ $student->budget_usd }}">
             <input name="passport_number" value="{{ $student->passport_number }}">
             <select name="agent_id">
@@ -106,8 +135,22 @@
 
 <dialog id="addStudent" class="card" style="max-width:760px;">
     <h3 style="margin-top:0;">Add Student</h3>
+    @if(session('duplicate_warning'))
+        <div class="card" style="border-color:#f59e0b;background:#fffbeb;margin-bottom:10px;">
+            <strong>Possible duplicate student(s) found:</strong>
+            <ul style="margin:6px 0 0 18px;">
+                @foreach(session('duplicate_warning') as $dup)
+                    <li><a href="/students/{{ $dup->id }}" target="_blank">{{ $dup->full_name }}</a> ({{ $dup->email }}{{ $dup->phone ? ' · '.$dup->phone : '' }})</li>
+                @endforeach
+            </ul>
+        </div>
+    @endif
     <form method="POST" action="/students">
         @csrf
+        <input type="hidden" name="_modal" value="addStudent">
+        @if(session('duplicate_warning'))
+            <input type="hidden" name="confirm_duplicate" value="1">
+        @endif
         <div class="grid-4">
             <input name="full_name" placeholder="Full name" required>
             <input name="email" placeholder="Email" required>
@@ -115,10 +158,31 @@
             <input name="phone" placeholder="Phone">
             <input name="nationality" placeholder="Nationality">
             <input name="gpa" placeholder="GPA">
-            <input name="field_of_study" placeholder="Field">
+            <select name="field_of_study">
+                <option value="">Field of Study</option>
+                @foreach(($studyFields ?? collect()) as $field)
+                    <option value="{{ $field }}">{{ $field }}</option>
+                @endforeach
+            </select>
+            <select name="preferred_university_language"><option value="">University language</option><option value="en">English</option><option value="tr">Turkish</option></select>
             <input name="english_level" placeholder="English level">
-            <select name="stage"><option value="lead">Lead</option><option value="applied">Applied</option><option value="offered">Offered</option><option value="accepted">Accepted</option><option value="enrolled">Enrolled</option></select>
+            <select name="stage">
+                @foreach(['lead','inquiry','applicant','documents_pending','interview_scheduled','admitted','visa_process','tuition_paid','enrolled','alumni'] as $st)
+                    <option value="{{ $st }}">{{ ucfirst($st) }}</option>
+                @endforeach
+            </select>
+            <select name="lifecycle_stage">
+                @foreach(['lead','inquiry','applicant','admitted','enrolled','alumni'] as $lc)
+                    <option value="{{ $lc }}">{{ ucfirst($lc) }}</option>
+                @endforeach
+            </select>
             <input name="target_country" placeholder="Target country">
+            <select name="lead_source">
+                <option value="">Lead Source</option>
+                @foreach(['website_form','landing_page','meta_ads','google_ads','whatsapp','instagram','telegram','email','phone_call','education_fair','referral','walk_in','other'] as $src)
+                    <option value="{{ $src }}">{{ ucwords(str_replace('_',' ', $src)) }}</option>
+                @endforeach
+            </select>
             <input name="budget_usd" placeholder="Budget USD">
             <input name="passport_number" placeholder="Passport #">
             <select name="agent_id">
@@ -141,4 +205,13 @@
         </div>
     </form>
 </dialog>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const modal = "{{ old('_modal') }}";
+    if (modal === 'addStudent' && document.getElementById('addStudent')) {
+        document.getElementById('addStudent').showModal();
+    }
+});
+</script>
+ </div>
 @endsection

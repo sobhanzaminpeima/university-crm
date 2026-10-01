@@ -1,9 +1,20 @@
 <!doctype html>
 <html>
-<head><meta charset="utf-8"><title>Advanced Report</title></head>
+<head>
+    <meta charset="utf-8">
+    <title>Advanced Report</title>
+    <style>
+        body { font-family: DejaVu Sans, Arial, sans-serif; font-size: 12px; color: #0f172a; }
+        h2 { margin: 0 0 12px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; }
+        thead th { background: #e2e8f0; font-weight: 700; }
+        tr:nth-child(even) td { background: #f8fafc; }
+    </style>
+</head>
 <body>
 <h2>Advanced Report</h2>
-<table border="1" cellspacing="0" cellpadding="6">
+<table>
     <thead><tr><th>Name</th><th>Email</th><th>Stage</th><th>Country</th><th>Agent</th><th>Sub-Agent</th></tr></thead>
     <tbody>
     @foreach($rows as $s)

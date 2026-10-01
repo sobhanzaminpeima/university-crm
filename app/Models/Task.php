@@ -14,6 +14,7 @@ class Task extends Model
         'tenant_id',
         'student_id',
         'assigned_to',
+        'created_by_user_id',
         'title',
         'description',
         'priority',

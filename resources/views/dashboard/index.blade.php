@@ -1,6 +1,7 @@
 @extends('layouts.app')
 
 @section('content')
+<div class="page-shell">
 <div class="hero monitor-hero">
     <h2>Control Center</h2>
     <div class="footer-note" style="color:#dbeafe;">Track requests, pipeline and critical actions in one screen.</div>
@@ -12,6 +13,12 @@
     <div class="card"><h3>Pending Tasks</h3><div class="metric">{{ $stats['pending_tasks'] }}</div></div>
     <div class="card"><h3>Unread Alerts</h3><div class="metric">{{ $unreadNotifications }}</div></div>
     <div class="card"><h3>Overdue Tasks</h3><div class="metric">{{ $overdueTasks }}</div></div>
+    @if($canViewConversions)
+    <div class="card"><h3>Conversion Rate</h3><div class="metric">{{ number_format((float)$conversionRate, 2) }}%</div></div>
+    <div class="card"><h3>Visa Success Rate</h3><div class="metric">{{ number_format((float)$visaSuccessRate, 2) }}%</div></div>
+    @endif
+    <div class="card"><h3>Overall CAC</h3><div class="metric">{{ $overallCac !== null ? number_format((float)$overallCac, 2) : '-' }}</div></div>
+    <div class="card"><h3>Revenue Forecast (Next Month)</h3><div class="metric">{{ number_format((float)$revenueForecastNextMonth, 2) }}</div></div>
 </div>
 
 <div class="three-col" style="margin-top:12px;">
@@ -41,7 +48,9 @@
         <p><a href="/applications">Applications Desk</a></p>
         <p><a href="/finance">Finance</a></p>
         <p><a href="/scholarships">Scholarships</a></p>
+        @if($canViewConversions)
         <p><a href="/agents/performance">Agent Performance</a></p>
+        @endif
     </div>
 </div>
 
@@ -102,6 +111,30 @@
     </div>
 </div>
 
+@if($canViewConversions)
+<div class="card" style="margin-top:12px;">
+    <h3>Source ROI & CAC</h3>
+    <table class="table-compact">
+        <thead><tr><th>Source</th><th>Leads</th><th>Enrolled</th><th>Cost</th><th>CAC</th><th>ROI %</th></tr></thead>
+        <tbody>
+        @forelse($sourceRoi as $row)
+            <tr>
+                <td>{{ ucwords(str_replace('_', ' ', $row->source_key)) }}</td>
+                <td>{{ $row->leads }}</td>
+                <td>{{ $row->enrolled }}</td>
+                <td>{{ number_format((float)$row->cost, 2) }}</td>
+                <td>{{ $row->cac !== null ? number_format((float)$row->cac, 2) : '-' }}</td>
+                <td>{{ $row->roi !== null ? number_format((float)$row->roi, 2).'%' : '-' }}</td>
+            </tr>
+        @empty
+            <tr><td colspan="6">No source data yet.</td></tr>
+        @endforelse
+        </tbody>
+    </table>
+</div>
+@endif
+
+@if($canViewConversions)
 <div class="card" style="margin-top:12px;">
     <h3>Upcoming Tasks</h3>
     <table class="table-compact">
@@ -141,4 +174,6 @@
         </div>
     </div>
 </div>
+@endif
+ </div>
 @endsection

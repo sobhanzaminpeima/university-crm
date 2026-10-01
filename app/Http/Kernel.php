@@ -6,6 +6,7 @@ use App\Http\Middleware\AuthenticateJwt;
 use App\Http\Middleware\AuthenticateCrm;
 use App\Http\Middleware\AuthenticateStudent;
 use App\Http\Middleware\EnsurePermission;
+use App\Http\Middleware\EnsureTenantSubscriptionActive;
 use App\Http\Middleware\EnsureTenantIsolation;
 use Illuminate\Foundation\Http\Kernel as HttpKernel;
 use Illuminate\Routing\Middleware\ThrottleRequests;
@@ -42,6 +43,7 @@ class Kernel extends HttpKernel
         'auth.crm' => AuthenticateCrm::class,
         'auth.student' => AuthenticateStudent::class,
         'tenant' => EnsureTenantIsolation::class,
+        'subscription.active' => EnsureTenantSubscriptionActive::class,
         'permission' => EnsurePermission::class,
     ];
 }

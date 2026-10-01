@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
 class EnsurePermission
@@ -20,6 +21,14 @@ class EnsurePermission
         }
 
         if (!$user->hasPermission($permission)) {
+            Log::warning('crm.permission_denied', [
+                'tenant_id' => $user->tenant_id,
+                'user_id' => $user->id,
+                'role_slug' => $user->role_slug,
+                'permission' => $permission,
+                'path' => $request->path(),
+                'method' => $request->method(),
+            ]);
             abort(403, 'You do not have permission for this action.');
         }
 

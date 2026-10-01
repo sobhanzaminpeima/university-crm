@@ -9,7 +9,9 @@
 <body style="display:flex;align-items:center;justify-content:center;min-height:100vh;">
 <div class="card" style="width:400px;">
     <h2 style="margin-top:0;">Sign in</h2>
-    <p class="footer-note">Default super admin: admincrm@vertue.com</p>
+    @if(session('success'))
+        <div class="card" style="border-color:#22c55e;margin-bottom:10px;">{{ session('success') }}</div>
+    @endif
     @if($errors->any())
         <div class="card" style="border-color:#ef4444;margin-bottom:10px;">{{ $errors->first() }}</div>
     @endif
