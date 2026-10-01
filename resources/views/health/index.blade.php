@@ -4,7 +4,9 @@
 <div class="page-shell">
 <div class="panel-head">
     <h1 class="panel-title">Health & Backup</h1>
-    <a class="secondary icon-action" href="/health/backup" title="Download tenant backup" aria-label="Download tenant backup">&#8681;</a>
+    @if($canManageBackups)
+        <a class="secondary icon-action" href="/health/backup" title="Download tenant backup" aria-label="Download tenant backup">&#8681;</a>
+    @endif
 </div>
 
 <div class="grid-4">
@@ -14,6 +16,7 @@
     <div class="card"><h3>Backup Tables</h3><div class="metric">{{ count($backupTables ?? []) }}</div></div>
 </div>
 
+@if($canManageBackups)
 <div class="card backup-panel">
     <div class="panel-head">
         <h3 style="margin:0;">Tenant Backup</h3>
@@ -38,11 +41,13 @@
         @csrf
         <div class="two-col">
             <input type="file" name="backup_file" accept=".json,.txt">
-            <button type="submit">Restore Backup</button>
+            <input type="password" name="current_password" required autocomplete="current-password" placeholder="Current password">
         </div>
         <textarea name="backup_json" rows="8" placeholder="Or paste backup JSON here" style="width:100%;margin-top:10px;"></textarea>
+        <button type="submit" style="margin-top:10px;">Restore verified backup</button>
     </form>
 </div>
+@endif
 </div>
 @endsection
 

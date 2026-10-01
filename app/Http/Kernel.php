@@ -15,6 +15,7 @@ use Illuminate\Routing\Middleware\ValidateSignature;
 class Kernel extends HttpKernel
 {
     protected $middleware = [
+        \App\Http\Middleware\SecurityHeaders::class,
         \Illuminate\Http\Middleware\HandleCors::class,
         \Illuminate\Foundation\Http\Middleware\ValidatePostSize::class,
         \App\Http\Middleware\TrimStrings::class,

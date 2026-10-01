@@ -4,7 +4,14 @@
 /outputs/
 /tmp/
 /database/*backup*.sql
+/database/**/*.sql.gz
+/database/**/*.sql.zip
 /docs/sql/virtuevisa_*_updated_*.sql
+/**/*production*.sql
+/**/*credentials*
+/**/*.pem
+/**/*.key
+!database/backups/*.sql.enc
 /.claude/
 /cj.txt
 /loginA.html

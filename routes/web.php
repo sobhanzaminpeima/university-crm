@@ -183,8 +183,8 @@ Route::middleware(['auth.crm', 'tenant', 'subscription.active'])->group(function
     Route::post('/telegram/unlink', [TelegramController::class, 'unlink'])->middleware('permission:telegram.use');
 });
 
-Route::post('/webhooks/student-status', [WebhookController::class, 'studentStatus']);
-Route::post('/telegram/webhook/{secret}', [TelegramWebhookController::class, 'handle']);
+Route::post('/webhooks/student-status', [WebhookController::class, 'studentStatus'])->middleware('throttle:60,1');
+Route::post('/telegram/webhook/{secret}', [TelegramWebhookController::class, 'handle'])->middleware('throttle:120,1');
 
 Route::middleware(['auth.student', 'tenant'])->prefix('portal')->group(function (): void {
     Route::get('/dashboard', [PortalWebController::class, 'dashboard']);

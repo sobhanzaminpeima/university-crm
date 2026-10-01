@@ -9,6 +9,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 class HealthController extends Controller
@@ -27,13 +29,13 @@ class HealthController extends Controller
         'automation_rules',
         'message_templates',
         'notifications',
-        'api_tokens',
         'study_fields',
         'intake_terms',
     ];
 
     public function index(Request $request): View
     {
+        $auth = $this->authUser($request);
         $dbOk = true;
         try {
             DB::select('SELECT 1');
@@ -50,12 +52,14 @@ class HealthController extends Controller
             'appDebug' => (bool) config('app.debug'),
             'appUrl' => (string) config('app.url'),
             'backupTables' => $this->availableBackupTables(),
+            'canManageBackups' => $auth->role_slug === 'super_admin',
         ]);
     }
 
     public function backup(Request $request)
     {
         $auth = $this->authUser($request);
+        $this->ensureSuperAdmin($auth->role_slug);
         $tables = $this->availableBackupTables();
         $data = [
             'meta' => [
@@ -80,6 +84,8 @@ class HealthController extends Controller
             $data['counts'][$table] = count($rows);
         }
 
+        $data['meta']['signature'] = $this->backupSignature($data['meta'], $data['data']);
+
         $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         $filename = 'tenant-backup-'.$auth->tenant_id.'-'.now()->format('Ymd-His').'.json';
 
@@ -93,10 +99,15 @@ class HealthController extends Controller
     public function restore(Request $request)
     {
         $auth = $this->authUser($request);
+        $this->ensureSuperAdmin($auth->role_slug);
         $payload = $request->validate([
             'backup_json' => 'nullable|string',
             'backup_file' => 'nullable|file|mimes:json,txt|max:20480',
+            'current_password' => 'required|string|max:255',
         ]);
+        if (!Hash::check((string) $payload['current_password'], (string) $auth->password)) {
+            throw ValidationException::withMessages(['current_password' => 'Current password is incorrect.']);
+        }
         $raw = trim((string) ($payload['backup_json'] ?? ''));
         if ($request->hasFile('backup_file')) {
             $raw = (string) file_get_contents($request->file('backup_file')->getRealPath());
@@ -108,6 +119,14 @@ class HealthController extends Controller
         $json = json_decode($raw, true);
         if (!is_array($json)) {
             return back()->withErrors(['backup_json' => 'Invalid JSON']);
+        }
+        $meta = $json['meta'] ?? [];
+        $signature = is_array($meta) ? (string) ($meta['signature'] ?? '') : '';
+        if (!is_array($meta) || ($meta['format'] ?? '') !== 'tenant-backup-v2' || (int) ($meta['tenant_id'] ?? 0) !== (int) $auth->tenant_id) {
+            return back()->withErrors(['backup_file' => 'This backup does not belong to the current tenant.']);
+        }
+        if ($signature === '' || !hash_equals($this->backupSignature($meta, (array) ($json['data'] ?? [])), $signature)) {
+            return back()->withErrors(['backup_file' => 'Backup signature is invalid or the file was modified.']);
         }
         $tables = $json['data'] ?? $json;
         if (!is_array($tables)) {
@@ -142,7 +161,21 @@ class HealthController extends Controller
         });
 
         $summary = collect($restored)->map(fn ($count, $table) => "{$table}: {$count}")->implode(', ');
+        $this->audit($request, 'tenant.backup_restore', 'tenant', (int) $auth->tenant_id, ['counts' => $restored]);
         return back()->with('success', 'Backup restored. '.$summary);
+    }
+
+    private function backupSignature(array $meta, array $data): string
+    {
+        unset($meta['signature']);
+        $payload = json_encode(['meta' => $meta, 'data' => $data], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION);
+
+        return hash_hmac('sha256', (string) $payload, (string) config('app.key'));
+    }
+
+    private function ensureSuperAdmin(string $role): void
+    {
+        abort_unless($role === 'super_admin', 403, 'Only super admin can manage backups.');
     }
 
     private function availableBackupTables(): array
