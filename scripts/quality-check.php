@@ -18,9 +18,10 @@ foreach ($iterator as $file) {
         continue;
     }
     if ($file->getExtension() === 'php') {
-        exec(escapeshellarg(PHP_BINARY).' -l '.escapeshellarg($path), $output, $code);
-        if ($code !== 0) {
-            $errors[] = "PHP syntax error: {$relative}";
+        try {
+            token_get_all((string) file_get_contents($path), TOKEN_PARSE);
+        } catch (ParseError $exception) {
+            $errors[] = "PHP syntax error: {$relative}: {$exception->getMessage()}";
         }
     }
     if (preg_match('/\.(php|blade\.php|js|ts|tsx|json|yml|yaml|md)$/', $relative)) {
