@@ -23,6 +23,7 @@
         <input type="password" name="password" required style="width:100%;margin:6px 0 14px;">
         <button type="submit" style="width:100%;">Login</button>
     </form>
+    <a href="/forgot-password" style="display:block;text-align:center;margin-top:12px;">Forgot password?</a>
     <a href="/portal/login" class="secondary" style="display:block;text-align:center;margin-top:10px;padding:10px 12px;border-radius:10px;text-decoration:none;">Student Portal</a>
 </div>
 </body>

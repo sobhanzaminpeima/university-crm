@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Support\SecretValue;
+
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -51,7 +53,7 @@ class FollowupCommunicationService
             return;
         }
         $apiUrl = trim((string) ($settings->sms_api_url ?? ''));
-        $token = trim((string) ($settings->sms_api_token ?? ''));
+        $token = SecretValue::decrypt($settings->sms_api_token ?? null);
         if ($apiUrl === '' || $token === '') {
             return;
         }
@@ -83,4 +85,3 @@ class FollowupCommunicationService
         }
     }
 }
-

@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\View\View;
+use App\Support\SecretValue;
 
 class SettingsController extends Controller
 {
@@ -161,14 +162,11 @@ class SettingsController extends Controller
             'docs_pending_sms_enabled' => 'nullable|boolean',
         ]);
 
-        DB::table('tenant_notification_settings')->updateOrInsert(
-            ['tenant_id' => $user->tenant_id],
-            [
+        $whatsappValues = [
                 'whatsapp_enabled' => (int) ($data['whatsapp_enabled'] ?? 0),
                 'whatsapp_number' => $data['whatsapp_number'] ?: null,
                 'provider' => $data['provider'] ?: 'custom',
                 'api_url' => $data['api_url'] ?: null,
-                'api_token' => $data['api_token'] ?: null,
                 'notify_new_student' => (int) ($data['notify_new_student'] ?? 0),
                 'notify_application_update' => (int) ($data['notify_application_update'] ?? 0),
                 'notify_document_update' => (int) ($data['notify_document_update'] ?? 0),
@@ -179,7 +177,13 @@ class SettingsController extends Controller
                 'docs_pending_sms_enabled' => (int) ($data['docs_pending_sms_enabled'] ?? 0),
                 'updated_at' => now(),
                 'created_at' => now(),
-            ]
+        ];
+        if (!empty($data['api_token'])) {
+            $whatsappValues['api_token'] = SecretValue::encrypt($data['api_token']);
+        }
+        DB::table('tenant_notification_settings')->updateOrInsert(
+            ['tenant_id' => $user->tenant_id],
+            $whatsappValues
         );
 
         $this->audit($request, 'settings.whatsapp.update', 'tenant', $user->tenant_id, [
@@ -209,22 +213,27 @@ class SettingsController extends Controller
             'ai_api_key' => 'nullable|string|max:255',
         ]);
 
-        DB::table('tenant_integration_settings')->updateOrInsert(
-            ['tenant_id' => $user->tenant_id],
-            [
+        $integrationValues = [
                 'email_enabled' => (int) ($data['email_enabled'] ?? 0),
                 'email_from_address' => $data['email_from_address'] ?? null,
                 'email_from_name' => $data['email_from_name'] ?? null,
                 'sms_enabled' => (int) ($data['sms_enabled'] ?? 0),
                 'sms_api_url' => $data['sms_api_url'] ?? null,
-                'sms_api_token' => $data['sms_api_token'] ?? null,
                 'ai_enabled' => (int) ($data['ai_enabled'] ?? 0),
                 'ai_provider' => $data['ai_provider'] ?? 'openai',
                 'ai_model' => $data['ai_model'] ?? null,
-                'ai_api_key' => $data['ai_api_key'] ?? null,
                 'updated_at' => now(),
                 'created_at' => now(),
-            ]
+        ];
+        if (!empty($data['sms_api_token'])) {
+            $integrationValues['sms_api_token'] = SecretValue::encrypt($data['sms_api_token']);
+        }
+        if (!empty($data['ai_api_key'])) {
+            $integrationValues['ai_api_key'] = SecretValue::encrypt($data['ai_api_key']);
+        }
+        DB::table('tenant_integration_settings')->updateOrInsert(
+            ['tenant_id' => $user->tenant_id],
+            $integrationValues
         );
 
         $this->audit($request, 'settings.integrations.update', 'tenant', $user->tenant_id, [

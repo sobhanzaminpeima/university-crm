@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Support\SecretValue;
+
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -21,7 +23,7 @@ class WhatsappNotificationService
         }
 
         $apiUrl = trim((string) ($settings->api_url ?? ''));
-        $apiToken = trim((string) ($settings->api_token ?? ''));
+        $apiToken = SecretValue::decrypt($settings->api_token ?? null);
         if ($apiUrl === '' || $apiToken === '') {
             return;
         }
@@ -100,4 +102,3 @@ class WhatsappNotificationService
             ->value('is_enabled');
     }
 }
-

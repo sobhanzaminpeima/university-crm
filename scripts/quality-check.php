@@ -56,6 +56,15 @@ $securityExpectations = [
         'X-Frame-Options',
         'Strict-Transport-Security',
     ],
+    'app/Http/Controllers/PasswordResetController.php' => [
+        "hash('sha256'",
+        "now()->subMinutes(60)",
+        "Str::random(64)",
+    ],
+    'app/Support/SecretValue.php' => [
+        'Crypt::encryptString',
+        'Crypt::decryptString',
+    ],
 ];
 foreach ($securityExpectations as $file => $needles) {
     $contents = file_get_contents($root.'/'.$file) ?: '';

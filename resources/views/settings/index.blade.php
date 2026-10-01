@@ -126,7 +126,7 @@
                     <option value="twilio" {{ ($whatsappSettings->provider ?? '') === 'twilio' ? 'selected' : '' }}>Twilio</option>
                 </select>
                 <input name="api_url" placeholder="Provider API URL" value="{{ $whatsappSettings->api_url ?? '' }}">
-                <input name="api_token" placeholder="Provider API Token" value="{{ $whatsappSettings->api_token ?? '' }}">
+                <input type="password" name="api_token" autocomplete="new-password" placeholder="Provider API Token (leave blank to keep current)">
                 <input type="number" min="1" max="30" name="docs_pending_days" placeholder="Docs pending threshold days" value="{{ $whatsappSettings->docs_pending_days ?? 3 }}">
             </div>
             <div style="margin-top:8px;display:flex;gap:14px;flex-wrap:wrap;">
@@ -167,14 +167,14 @@
             <input type="text" name="email_from_name" placeholder="Email From Name" value="{{ $integrationSettings->email_from_name ?? '' }}">
             <label><input type="checkbox" name="sms_enabled" value="1" {{ (int)($integrationSettings->sms_enabled ?? 0) === 1 ? 'checked' : '' }}> Enable SMS Automation</label>
             <input type="url" name="sms_api_url" placeholder="SMS API URL" value="{{ $integrationSettings->sms_api_url ?? '' }}">
-            <input type="text" name="sms_api_token" placeholder="SMS API Token" value="{{ $integrationSettings->sms_api_token ?? '' }}">
+            <input type="password" name="sms_api_token" autocomplete="new-password" placeholder="SMS API Token (leave blank to keep current)">
             <label><input type="checkbox" name="ai_enabled" value="1" {{ (int)($integrationSettings->ai_enabled ?? 0) === 1 ? 'checked' : '' }}> Enable AI Layer</label>
             <select name="ai_provider">
                 <option value="openai" {{ ($integrationSettings->ai_provider ?? 'openai') === 'openai' ? 'selected' : '' }}>OpenAI</option>
                 <option value="custom" {{ ($integrationSettings->ai_provider ?? '') === 'custom' ? 'selected' : '' }}>Custom</option>
             </select>
             <input type="text" name="ai_model" placeholder="AI model (e.g. gpt-4o-mini)" value="{{ $integrationSettings->ai_model ?? '' }}">
-            <input type="text" name="ai_api_key" placeholder="AI API key" value="{{ $integrationSettings->ai_api_key ?? '' }}">
+            <input type="password" name="ai_api_key" autocomplete="new-password" placeholder="AI API key (leave blank to keep current)">
         </div>
         <div style="margin-top:10px;">
             <button type="submit">Save Integration Settings</button>

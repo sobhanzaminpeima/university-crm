@@ -31,6 +31,7 @@ use App\Http\Controllers\WebhookController;
 use App\Http\Controllers\SaasTenantController;
 use App\Http\Controllers\SaasPackageController;
 use App\Http\Controllers\LandingController;
+use App\Http\Controllers\PasswordResetController;
 use App\Http\Controllers\StudyCatalogController;
 use Illuminate\Support\Facades\Route;
 
@@ -40,6 +41,10 @@ Route::post('/register', [LandingController::class, 'register']);
 Route::get('/privacy-policy', [LandingController::class, 'privacy']);
 Route::get('/contact', [LandingController::class, 'contact']);
 Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
+Route::get('/forgot-password', [PasswordResetController::class, 'requestForm'])->middleware('guest:crm');
+Route::post('/forgot-password', [PasswordResetController::class, 'sendLink'])->middleware(['guest:crm', 'throttle:5,1']);
+Route::get('/reset-password/{token}', [PasswordResetController::class, 'resetForm'])->middleware('guest:crm');
+Route::post('/reset-password', [PasswordResetController::class, 'reset'])->middleware(['guest:crm', 'throttle:5,1']);
 Route::get('/up', [HealthController::class, 'readiness'])->middleware('throttle:30,1');
 Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
 Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth.crm');
