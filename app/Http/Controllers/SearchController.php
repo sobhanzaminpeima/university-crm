@@ -591,50 +591,7 @@ class SearchController extends Controller
             ['label' => 'University Tuition Range', 'type' => 'string'],
             ['label' => 'Data Notes', 'type' => 'string', 'width' => 46],
         ];
-        $data = $rows->map(function ($row) {
-            $notes = [];
-            $language = trim((string) ($row->language ?? ''));
-            if ($language === '' && preg_match('/Language as imported: ([^|]+)/u', (string) ($row->notes ?? ''), $m)) {
-                $language = trim($m[1]);
-                $notes[] = 'Language as typed on import';
-            }
-            if ($language === '' && trim((string) ($row->university_language ?? '')) !== '') {
-                $language = (string) $row->university_language;
-                $notes[] = 'Language from university profile';
-            }
-            $currency = trim((string) ($row->currency ?? '')) ?: (string) ($row->university_currency ?? '');
-            $fee = $row->fee ?? null;
-            $range = trim((string) ($row->university_tuition_range ?? ''));
-            $feeType = $this->feeTypeLabel($row->fee_type ?? '');
-            if ($fee === null || $fee === '') {
-                if ($feeType === '') {
-                    $feeType = $this->feeTypeLabel($row->university_fee_type ?? '');
-                }
-                $notes[] = $range !== '' ? 'No program tuition — see university range' : 'Tuition missing';
-            } elseif ((float) $fee > 0 && (float) $fee < 100) {
-                $notes[] = 'Tuition looks too low — please verify';
-            }
-            if ($language === '') {
-                $notes[] = 'Language missing';
-            }
-
-            return [
-                $row->university_name ?? '',
-                $row->country ?? '',
-                $row->program_name ?? '',
-                $row->degree_level ?? '',
-                SpreadsheetExport::human($row->thesis_type ?? ''),
-                $language,
-                $row->duration ?? '',
-                $currency,
-                $fee,
-                $feeType,
-                $row->discounted_fee_full ?? '',
-                $row->discounted_fee_installment ?? '',
-                $range,
-                implode('; ', $notes),
-            ];
-        });
+        $data = $this->completeProgramRows($rows);
 
         return SpreadsheetExport::make('Program Search Results', $columns, $data, $this->exportFilters($request))
             ->download('programs');
@@ -673,6 +630,177 @@ class SearchController extends Controller
     private function defaultDegreeOptions(): array
     {
         return ['Diploma', 'Associate', 'Bachelor', 'Master', 'PhD'];
+    }
+
+    /**
+     * Turn raw program rows into complete export rows.
+     *
+     * 1. Duplicates (same university name + country + program + degree + thesis + language, created by
+     *    older imports or by universities registered twice) are merged into one row; every empty field is
+     *    filled from its twin, so e.g. one copy's "Yearly" completes the other.
+     * 2. Remaining gaps are filled from the university profile (language, currency, fee type, range).
+     * 3. Anything still unknown is written explicitly ("Not specified" / "N/A") instead of left blank.
+     * Values are never invented; the "Data Notes" column explains where filled values came from.
+     */
+    private function completeProgramRows($rows)
+    {
+        $norm = fn ($v) => mb_strtolower(preg_replace('/\s+/u', ' ', trim((string) $v)) ?? '');
+        $blank = fn ($v) => $v === null || trim((string) $v) === '';
+        $feeTypeWords = ['total program' => 'total_program', 'total' => 'total_program', 'yearly' => 'yearly', 'per year' => 'yearly', 'annual' => 'yearly', 'per semester' => 'per_semester', 'semester' => 'per_semester'];
+
+        $prepared = collect($rows)->map(function ($row) use ($blank) {
+            $row = clone $row;
+            if ($blank($row->language ?? null) && preg_match('/Language as imported: ([^|]+)/u', (string) ($row->notes ?? ''), $m)) {
+                $row->language_from = 'import';
+                $row->language = trim($m[1]);
+            }
+
+            return $row;
+        });
+
+        // Group duplicates; a group with several different real tuition values stays split per tuition.
+        $groups = [];
+        foreach ($prepared as $row) {
+            $key = implode('|', [
+                $norm($row->university_name ?? ''), $norm($row->country ?? ''), $norm($row->program_name ?? ''),
+                $norm($row->degree_level ?? ''), $norm($row->thesis_type ?? ''), $norm($row->language ?? ''),
+            ]);
+            $groups[$key][] = $row;
+        }
+
+        $fields = ['duration', 'currency', 'fee', 'fee_type', 'discounted_fee_full', 'discounted_fee_installment',
+            'thesis_type', 'language', 'university_language', 'university_currency', 'university_tuition_range', 'university_fee_type'];
+        $out = [];
+        foreach ($groups as $group) {
+            $fees = array_values(array_unique(array_map(fn ($r) => (string) (float) $r->fee, array_filter($group, fn ($r) => !$blank($r->fee ?? null)))));
+            $buckets = count($fees) <= 1 ? [$group] : array_map(fn ($fee) => array_values(array_filter($group, fn ($r) => !$blank($r->fee ?? null) && (string) (float) $r->fee === $fee)), $fees);
+            $feeless = array_values(array_filter($group, fn ($r) => $blank($r->fee ?? null)));
+            foreach ($buckets as $bucket) {
+                $members = count($fees) <= 1 ? $bucket : array_merge($bucket, $feeless);
+                $base = clone $bucket[0];
+                foreach ($fields as $field) {
+                    if ($blank($base->{$field} ?? null)) {
+                        foreach ($members as $other) {
+                            if (!$blank($other->{$field} ?? null)) {
+                                $base->{$field} = $other->{$field};
+                                break;
+                            }
+                        }
+                    }
+                }
+                $base->merged_count = count($members);
+                $base->tuition_conflict = count($fees) > 1;
+                $out[] = $base;
+            }
+        }
+
+        usort($out, fn ($a, $b) => [$norm($a->program_name), $norm($a->university_name)] <=> [$norm($b->program_name), $norm($b->university_name)]);
+
+        return collect($out)->map(function ($row) use ($blank, $feeTypeWords) {
+            $notes = [];
+            if (($row->merged_count ?? 1) > 1) {
+                $notes[] = 'Merged '.$row->merged_count.' duplicate rows';
+            }
+            if (!empty($row->tuition_conflict)) {
+                $notes[] = 'Another row lists a different tuition for this program — please verify';
+            }
+
+            // Language
+            $language = trim((string) ($row->language ?? ''));
+            if (($row->language_from ?? '') === 'import') {
+                $notes[] = 'Language as typed on import';
+            }
+            if ($language === '' && !$blank($row->university_language ?? null)) {
+                $language = (string) $row->university_language;
+                $notes[] = 'Language from university profile';
+            }
+
+            // Currency (normalised: EURO/Euro/€ -> EUR ...)
+            $currency = $this->normalizeCurrency((string) ($row->currency ?? '')) ?: $this->normalizeCurrency((string) ($row->university_currency ?? ''));
+
+            // Tuition basis and range ("total program" typed into the range field is really a basis)
+            $range = trim((string) ($row->university_tuition_range ?? ''));
+            $rangeAsBasis = $feeTypeWords[mb_strtolower($range)] ?? null;
+            if ($rangeAsBasis !== null) {
+                $range = '';
+            }
+            $basis = $this->feeTypeLabel($row->fee_type ?? '');
+            if ($basis === '' && $this->feeTypeLabel($row->university_fee_type ?? '') !== '') {
+                $basis = $this->feeTypeLabel($row->university_fee_type);
+                $notes[] = 'Tuition basis from university profile';
+            } elseif ($basis === '' && $rangeAsBasis !== null) {
+                $basis = $this->feeTypeLabel($rangeAsBasis);
+                $notes[] = 'Tuition basis from university profile';
+            }
+
+            $fee = $blank($row->fee ?? null) ? null : (float) $row->fee;
+            if ($fee === null) {
+                $notes[] = $range !== '' ? 'No program tuition — see university range' : 'Tuition missing';
+            } elseif ($fee > 0 && $fee < 100) {
+                $notes[] = 'Tuition looks too low — please verify';
+            }
+            if ($language === '') {
+                $notes[] = 'Language missing';
+            }
+
+            $degree = trim((string) ($row->degree_level ?? ''));
+            $thesis = SpreadsheetExport::human($row->thesis_type ?? '');
+            if ($thesis === '') {
+                $thesis = preg_match('/master|msc|m\.s|ma\b|mba/i', $degree) ? 'Not specified' : 'N/A';
+            }
+
+            $na = 'Not specified';
+
+            return [
+                $row->university_name ?: $na,
+                $row->country ?: $na,
+                $row->program_name ?: $na,
+                $degree ?: $na,
+                $thesis,
+                $language ?: $na,
+                $this->normalizeDuration((string) ($row->duration ?? '')) ?: $na,
+                $currency ?: $na,
+                $fee ?? $na,
+                $basis ?: $na,
+                $blank($row->discounted_fee_full ?? null) ? 'None listed' : (float) $row->discounted_fee_full,
+                $blank($row->discounted_fee_installment ?? null) ? 'None listed' : (float) $row->discounted_fee_installment,
+                $range ?: $na,
+                $notes ? implode('; ', $notes) : 'Complete',
+            ];
+        });
+    }
+
+    private function normalizeCurrency(string $value): string
+    {
+        $v = mb_strtoupper(trim($value));
+        if ($v === '') {
+            return '';
+        }
+
+        return match (true) {
+            in_array($v, ['EURO', 'EUROS', 'EUR', '€'], true) => 'EUR',
+            in_array($v, ['USD', 'US$', '$', 'DOLLAR', 'DOLLARS', 'US DOLLAR'], true) => 'USD',
+            in_array($v, ['TRY', 'TL', '₺', 'LIRA', 'TURKISH LIRA'], true) => 'TRY',
+            in_array($v, ['GBP', '£', 'POUND', 'POUNDS'], true) => 'GBP',
+            default => $v,
+        };
+    }
+
+    /** "4" -> "4 years", "3,5 - 5" -> "3.5–5 years"; text that already has a unit is kept. */
+    private function normalizeDuration(string $value): string
+    {
+        $v = trim($value);
+        if ($v === '') {
+            return '';
+        }
+        if (preg_match('/^(\d+(?:[.,]\d+)?)(?:\s*[-–]\s*(\d+(?:[.,]\d+)?))?$/u', $v, $m)) {
+            $from = str_replace(',', '.', $m[1]);
+            $to = isset($m[2]) ? str_replace(',', '.', $m[2]) : null;
+
+            return $to !== null ? "{$from}–{$to} years" : $from.((float) $from === 1.0 ? ' year' : ' years');
+        }
+
+        return $v;
     }
 
     private function feeTypeLabel(?string $value): string
