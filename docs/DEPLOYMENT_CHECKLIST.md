@@ -49,3 +49,9 @@ Pushing to GitHub does **not** deploy. The owner deploys manually with the separ
 2. Rebuild the caches as in "Deploy" step 3.
 
 No database rollback is needed, because there are no schema changes. If the webhook was connected and you roll back, it keeps working, because the old code accepts the same URL.
+
+## Batch 3 additions (program tuition/language)
+
+- Migration `2026_11_24_000100_ensure_fee_type_columns` is **additive and idempotent**. If the old SQL patch `docs/sql/2026_05_17_university_fee_type_and_cleanup_patch.sql` was already applied in production, it does nothing. Back up the database first, as always.
+- After deploying, **re-import your original universities/programs CSV**. Rows that were saved with wrong or missing tuition or language will be **updated in place**, with no duplicates created.
+- Then export Programs and filter the "Data Notes" column for "please verify" or "missing" to find anything that still needs a manual edit.

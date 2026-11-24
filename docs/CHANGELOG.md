@@ -1,5 +1,14 @@
 # Change log
 
+## 2026-11-24 — Program tuition/language data fixes (batch 3)
+
+- Root cause of missing/incorrect tuition in program exports: the CSV importer parsed "4,000" as 4, "$4,500" as 4.5, and dropped "USD 3500", "12,500.50" and "3,750 / year". The fee parser now handles thousands separators, decimal commas, currency symbols/codes and suffixes; ranges are kept in the program notes and reported instead of being silently dropped.
+- Root cause of missing languages: only exact values were recognised; "English / Turkish", "EN/TR", "Turkish, English", "İngilizce", "Ingilizce" are now understood. Unrecognised languages (e.g. Russian) are kept in the notes and reported.
+- Re-importing a program now updates the existing row (identity: university + degree + name + thesis type + language) instead of inserting a duplicate next to the old empty row; empty cells no longer erase saved values.
+- Programs export: honours the University name, City and Type filters (previously ignored, so unrelated universities were mixed in); falls back to the university's language/currency, shows the university tuition range, and explains every gap in a "Data Notes" column ("Tuition looks too low — please verify" flags values corrupted by the old importer).
+- New idempotent migration `2026_11_24_000100_ensure_fee_type_columns`: adds `universities.tuition_fee_type` / `university_programs.fee_type` only when missing (they previously existed only via a manual SQL patch, so fresh installs crashed on the Universities page).
+- Import result message says "Please review" instead of "rows were skipped" for warnings.
+
 ## 2026-11-24 — Exports, navigation and Telegram bot (batch 2)
 
 ### Excel exports

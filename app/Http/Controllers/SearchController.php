@@ -514,6 +514,14 @@ class SearchController extends Controller
                     $columns[] = 'university_programs.'.$optional;
                 }
             }
+            // University-level defaults, used when a program has no language/tuition of its own.
+            $columns[] = 'universities.language as university_language';
+            $columns[] = 'universities.currency as university_currency';
+            $columns[] = 'universities.tuition_range as university_tuition_range';
+            if (Schema::hasColumn('universities', 'tuition_fee_type')) {
+                $columns[] = 'universities.tuition_fee_type as university_fee_type';
+            }
+            $columns[] = 'university_programs.notes';
             $rows = DB::table('university_programs')
                 ->join('universities', function ($join) use ($tenantId) {
                     $join->on('universities.id', '=', 'university_programs.university_id')
@@ -534,6 +542,18 @@ class SearchController extends Controller
                     });
                 })
                 ->when($countryUniversity !== '', fn ($query) => $query->where('universities.country', $countryUniversity))
+                // Same university filters as the on-screen list (previously ignored, so the export
+                // mixed in programs from universities the user had filtered out).
+                ->when(trim((string) $request->query('university_name', '')) !== '', fn ($query) => $query->where('universities.name', 'like', '%'.trim((string) $request->query('university_name')).'%'))
+                ->when(trim((string) $request->query('city_university', '')) !== '', function ($query) use ($request) {
+                    $city = trim((string) $request->query('city_university'));
+                    if (Schema::hasColumn('universities', 'city')) {
+                        $query->where('universities.city', $city);
+                    } else {
+                        $query->where(fn ($sub) => $sub->where('universities.name', 'like', "%{$city}%")->orWhere('universities.description', 'like', "%{$city}%"));
+                    }
+                })
+                ->when(trim((string) $request->query('university_type', '')) !== '' && Schema::hasColumn('universities', 'institution_type'), fn ($query) => $query->whereRaw('LOWER(universities.institution_type) = ?', [mb_strtolower(trim((string) $request->query('university_type')))]))
                 ->when($universityId > 0, fn ($query) => $query->where('university_programs.university_id', $universityId))
                 ->when($degree !== '', function ($query) use ($degreeAliases) {
                     $query->where(function ($sub) use ($degreeAliases) {
@@ -568,21 +588,53 @@ class SearchController extends Controller
             ['label' => 'Tuition Basis', 'type' => 'string'],
             ['label' => 'Discounted (Full Payment)', 'type' => 'money'],
             ['label' => 'Discounted (Installments)', 'type' => 'money'],
+            ['label' => 'University Tuition Range', 'type' => 'string'],
+            ['label' => 'Data Notes', 'type' => 'string', 'width' => 46],
         ];
-        $data = $rows->map(fn ($row) => [
-            $row->university_name ?? '',
-            $row->country ?? '',
-            $row->program_name ?? '',
-            $row->degree_level ?? '',
-            SpreadsheetExport::human($row->thesis_type ?? ''),
-            $row->language ?? '',
-            $row->duration ?? '',
-            $row->currency ?? '',
-            $row->fee ?? '',
-            $this->feeTypeLabel($row->fee_type ?? ''),
-            $row->discounted_fee_full ?? '',
-            $row->discounted_fee_installment ?? '',
-        ]);
+        $data = $rows->map(function ($row) {
+            $notes = [];
+            $language = trim((string) ($row->language ?? ''));
+            if ($language === '' && preg_match('/Language as imported: ([^|]+)/u', (string) ($row->notes ?? ''), $m)) {
+                $language = trim($m[1]);
+                $notes[] = 'Language as typed on import';
+            }
+            if ($language === '' && trim((string) ($row->university_language ?? '')) !== '') {
+                $language = (string) $row->university_language;
+                $notes[] = 'Language from university profile';
+            }
+            $currency = trim((string) ($row->currency ?? '')) ?: (string) ($row->university_currency ?? '');
+            $fee = $row->fee ?? null;
+            $range = trim((string) ($row->university_tuition_range ?? ''));
+            $feeType = $this->feeTypeLabel($row->fee_type ?? '');
+            if ($fee === null || $fee === '') {
+                if ($feeType === '') {
+                    $feeType = $this->feeTypeLabel($row->university_fee_type ?? '');
+                }
+                $notes[] = $range !== '' ? 'No program tuition — see university range' : 'Tuition missing';
+            } elseif ((float) $fee > 0 && (float) $fee < 100) {
+                $notes[] = 'Tuition looks too low — please verify';
+            }
+            if ($language === '') {
+                $notes[] = 'Language missing';
+            }
+
+            return [
+                $row->university_name ?? '',
+                $row->country ?? '',
+                $row->program_name ?? '',
+                $row->degree_level ?? '',
+                SpreadsheetExport::human($row->thesis_type ?? ''),
+                $language,
+                $row->duration ?? '',
+                $currency,
+                $fee,
+                $feeType,
+                $row->discounted_fee_full ?? '',
+                $row->discounted_fee_installment ?? '',
+                $range,
+                implode('; ', $notes),
+            ];
+        });
 
         return SpreadsheetExport::make('Program Search Results', $columns, $data, $this->exportFilters($request))
             ->download('programs');

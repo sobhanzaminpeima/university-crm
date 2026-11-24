@@ -702,30 +702,63 @@ class UniversityController extends Controller
                     if ($programName === null || $programName === '') {
                         continue;
                     }
-                    $match = [
-                        'tenant_id' => $user->tenant_id,
-                        'university_id' => $university->id,
-                        'degree_level' => $normalizedDegree ?: 'Bachelor',
-                        'program_name' => $programName,
+                    $rawFee = trim((string) ($payload['program_fee'] ?? ''));
+                    if ($programFee === null && $rawFee !== '') {
+                        // Never drop what the user typed: keep it visible in the notes and report it.
+                        $errors[] = "Line {$lineNo}: tuition \"{$rawFee}\" for \"{$programName}\" is not a single amount; kept in the program notes.";
+                        $programNotes = trim(($programNotes ? $programNotes.' | ' : '').'Tuition as imported: '.$rawFee);
+                    }
+                    $rawLanguage = trim((string) ($payload['program_language'] ?? ''));
+                    if ($programLanguage === null && $rawLanguage !== '') {
+                        $errors[] = "Line {$lineNo}: language \"{$rawLanguage}\" for \"{$programName}\" is not one of English/Turkish/Arabic/Both; kept in the program notes.";
+                        $programNotes = trim(($programNotes ? $programNotes.' | ' : '').'Language as imported: '.$rawLanguage);
+                    }
+
+                    // Identify a program by university + degree + name (+ thesis type, + language when given).
+                    // Tuition, currency and duration are values to UPDATE, not part of the identity — otherwise
+                    // re-importing a corrected fee created a second row next to the old empty one.
+                    $hasThesis = Schema::hasColumn('university_programs', 'thesis_type');
+                    $existing = DB::table('university_programs')
+                        ->where('tenant_id', $user->tenant_id)
+                        ->where('university_id', $university->id)
+                        ->where('degree_level', $normalizedDegree ?: 'Bachelor')
+                        ->whereRaw('LOWER(TRIM(program_name)) = ?', [mb_strtolower(trim($programName))])
+                        ->when($hasThesis, fn ($q) => $thesisType === null ? $q->whereNull('thesis_type') : $q->where('thesis_type', $thesisType))
+                        ->where(function ($q) use ($programLanguage) {
+                            // Same language, or an older row whose language was never captured.
+                            $programLanguage === null ? $q->whereNull('language') : $q->where('language', $programLanguage)->orWhereNull('language');
+                        })
+                        ->orderByRaw('language IS NULL') // prefer the exact-language row
+                        ->orderBy('id')
+                        ->first();
+
+                    $values = array_filter([
                         'language' => $programLanguage,
                         'duration' => $programDuration,
                         'currency' => $programCurrency,
                         'fee' => $programFee,
-                    ];
-                    $update = [
                         'notes' => $programNotes,
-                        'updated_at' => now(),
-                        'created_at' => now(),
-                    ];
-                    if (Schema::hasColumn('university_programs', 'thesis_type')) {
-                        $match['thesis_type'] = $thesisType;
-                        $update['thesis_type'] = $thesisType;
+                    ], fn ($v) => $v !== null && $v !== ''); // an empty cell never erases saved data
+                    if (Schema::hasColumn('university_programs', 'fee_type') && $programFeeType !== null) {
+                        $values['fee_type'] = $programFeeType;
                     }
-                    if (Schema::hasColumn('university_programs', 'fee_type')) {
-                        $match['fee_type'] = $programFeeType;
-                        $update['fee_type'] = $programFeeType;
+
+                    if ($existing) {
+                        DB::table('university_programs')->where('id', $existing->id)->update($values + ['updated_at' => now()]);
+                    } else {
+                        $insert = $values + [
+                            'tenant_id' => $user->tenant_id,
+                            'university_id' => $university->id,
+                            'degree_level' => $normalizedDegree ?: 'Bachelor',
+                            'program_name' => $programName,
+                            'created_at' => now(),
+                            'updated_at' => now(),
+                        ];
+                        if ($hasThesis) {
+                            $insert['thesis_type'] = $thesisType;
+                        }
+                        DB::table('university_programs')->insert($insert);
                     }
-                    DB::table('university_programs')->updateOrInsert($match, $update);
                     $programsUpserted++;
                 }
             }
@@ -754,7 +787,7 @@ class UniversityController extends Controller
             $message .= " Duplicate programs removed: {$duplicateProgramsRemoved}.";
         }
         if (!empty($errors)) {
-            $message .= ' Some rows were skipped: '.implode(' | ', array_slice($errors, 0, 5));
+            $message .= ' Please review: '.implode(' | ', array_slice($errors, 0, 5)).(count($errors) > 5 ? ' (+'.(count($errors) - 5).' more)' : '');
         }
 
         return back()->with('success', $message);
@@ -821,7 +854,7 @@ class UniversityController extends Controller
             $programLanguage = $this->normalizeProgramLanguage((string) ($row['program_language'] ?? ''));
             $programDuration = ($row['program_duration'] ?? null) ?: null;
             $programCurrency = ($row['program_currency'] ?? null) ?: 'USD';
-            $programFee = is_numeric((string) ($row['program_fee'] ?? '')) ? (float) $row['program_fee'] : null;
+            $programFee = $this->normalizeFee($row['program_fee'] ?? null);
             $programId = (int) ($row['program_id'] ?? 0);
             $update = [
             'degree_level' => $degreeLevel,
@@ -1133,22 +1166,34 @@ class UniversityController extends Controller
 
     private function normalizeProgramLanguage(string $value): ?string
     {
-        $needle = mb_strtolower(trim($value));
+        // Lower-case with Turkish dotted/dotless i folded so "İngilizce" and "TÜRKÇE" match.
+        $needle = mb_strtolower(str_replace(['İ', 'I', 'ı'], ['i', 'i', 'i'], trim($value)));
+        $needle = str_replace("\u{0307}", '', $needle);
         if ($needle === '') {
             return null;
         }
-        if (in_array($needle, ['tr', 'turkish', 'turkce', 'türkçe'], true)) {
-            return 'Turkish';
-        }
-        if (in_array($needle, ['en', 'english'], true)) {
-            return 'English';
-        }
-        if (in_array($needle, ['ar', 'arabic'], true)) {
-            return 'Arabic';
-        }
-        if (in_array($needle, ['both', 'english/turkish', 'turkish/english'], true)) {
+        if ($needle === 'both') {
             return 'Both';
         }
+        $tokens = preg_split('/[^\pL]+/u', $needle, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $has = fn (array $words) => (bool) array_intersect($tokens, $words);
+        $english = $has(['en', 'eng', 'english', 'ingilizce', 'inglizce', 'انگلیسی', 'الانجليزية', 'الإنجليزية', 'انجليزي']);
+        $turkish = $has(['tr', 'tur', 'turkish', 'turkce', 'türkçe', 'turkçe', 'türkce', 'ترکی', 'التركية', 'تركي']);
+        $arabic = $has(['ar', 'arabic', 'arapça', 'arapca', 'عربی', 'العربية', 'عربي']);
+
+        if ($english && $turkish) {
+            return 'Both';
+        }
+        if ($english) {
+            return 'English';
+        }
+        if ($turkish) {
+            return 'Turkish';
+        }
+        if ($arabic) {
+            return 'Arabic';
+        }
+
         return null;
     }
 
@@ -1174,21 +1219,57 @@ class UniversityController extends Controller
         return mb_substr($text, 0, $maxLength);
     }
 
+    /**
+     * Parse a tuition amount as typed in spreadsheets: "4,000", "$4,500", "USD 3500", "12.500,50",
+     * "3,750 / year". Thousands separators are removed (previously "4,000" was stored as 4 and
+     * "USD 3500" was dropped). Ranges and text that is not a single amount return null.
+     */
     private function normalizeFee(mixed $value): ?float
     {
         if ($value === null) {
             return null;
         }
+        if (is_int($value) || is_float($value)) {
+            return $value >= 0 ? (float) $value : null;
+        }
         $raw = trim((string) $value);
         if ($raw === '') {
             return null;
         }
-        $normalized = str_replace(['$', '€', '£', '₺', ' '], '', $raw);
-        $normalized = str_replace(',', '.', $normalized);
-        if (!is_numeric($normalized)) {
+        // Keep only digits and separators; drop currency symbols/codes and words like "/ year".
+        $numeric = preg_replace('/[^0-9.,\s\-–]/u', ' ', $raw) ?? '';
+        $numeric = trim(preg_replace('/\s+/', ' ', $numeric) ?? '');
+        // A range such as "3000-5000" is not a single fee.
+        if (preg_match('/\d\s*[-–]\s*\d/', $numeric)) {
             return null;
         }
-        return (float) $normalized;
+        $numeric = str_replace([' ', '-', '–'], '', $numeric);
+        if ($numeric === '' || !preg_match('/\d/', $numeric)) {
+            return null;
+        }
+
+        $lastComma = strrpos($numeric, ',');
+        $lastDot = strrpos($numeric, '.');
+        if ($lastComma !== false && $lastDot !== false) {
+            // Whichever separator comes last is the decimal mark.
+            $decimal = $lastComma > $lastDot ? ',' : '.';
+            $thousands = $decimal === ',' ? '.' : ',';
+            $numeric = str_replace($thousands, '', $numeric);
+            $numeric = str_replace($decimal, '.', $numeric);
+        } elseif ($lastComma !== false) {
+            // "4,000" / "12,500,000" are thousands; "4,5" is a decimal comma.
+            $numeric = preg_match('/^\d{1,3}(,\d{3})+$/', $numeric) ? str_replace(',', '', $numeric) : str_replace(',', '.', $numeric);
+        } elseif ($lastDot !== false && preg_match('/^\d{1,3}(\.\d{3})+$/', $numeric)) {
+            // "2.750" written with a European thousands dot.
+            $numeric = str_replace('.', '', $numeric);
+        }
+
+        if (!is_numeric($numeric)) {
+            return null;
+        }
+        $fee = (float) $numeric;
+
+        return $fee >= 0 ? $fee : null;
     }
 
     private function normalizeThesisType(string $value): ?string
