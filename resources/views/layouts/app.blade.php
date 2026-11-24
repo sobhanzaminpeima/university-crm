@@ -36,6 +36,7 @@
     <link rel="stylesheet" href="/assets/app.css">
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to main content</a>
 @php
     $authUser = request()->attributes->get('auth_user');
     $headerNotifications = collect();
@@ -61,7 +62,7 @@
 @endphp
 <div class="layout">
     <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeSidebar()"></div>
-    <aside class="sidebar">
+    <aside class="sidebar" id="appSidebar" aria-label="Main navigation">
         <h1>Vertue CRM</h1>
         <a class="nav-link {{ request()->is('dashboard') ? 'active' : '' }}" href="/dashboard">Dashboard</a>
         <details class="menu-group" open>
@@ -100,7 +101,7 @@
                 <a class="nav-link {{ request()->is('finance*') ? 'active' : '' }}" href="/finance">Finance</a>
             @endif
             @if($can('users.view'))
-                <a class="nav-link {{ request()->is('agents*') ? 'active' : '' }}" href="/agents">Agents & Roles</a>
+                <a class="nav-link {{ request()->is('agents*') && !request()->is('agents/performance*') ? 'active' : '' }}" href="/agents">Agents &amp; Roles</a>
             @endif
             @if($can('agent_performance.view'))
                 <a class="nav-link {{ request()->is('agents/performance*') ? 'active' : '' }}" href="/agents/performance">Agent Performance</a>
@@ -128,7 +129,7 @@
             <a class="nav-link {{ request()->is('saas/packages*') ? 'active' : '' }}" href="/saas/packages">SaaS Packages</a>
         @endif
         @if($can('settings.view'))
-            <a class="nav-link {{ request()->is('settings*') ? 'active' : '' }}" href="/settings">Settings</a>
+            <a class="nav-link {{ request()->is('settings*') && !request()->is('settings/study-catalogs*') ? 'active' : '' }}" href="/settings">Settings</a>
         @endif
         @if($can('telegram.use'))
             <a class="nav-link {{ request()->is('telegram*') ? 'active' : '' }}" href="/telegram">Telegram Bot</a>
@@ -138,32 +139,33 @@
             <button type="submit" class="secondary" style="width:100%;">Logout</button>
         </form>
     </aside>
-    <main class="main">
+    <main class="main" id="main-content" tabindex="-1">
         <div class="topbar">
             <div style="display:flex;flex-direction:column;">
-                <button type="button" class="mobile-menu-btn" onclick="toggleSidebar()">☰ Menu</button>
+                <button type="button" class="mobile-menu-btn" onclick="toggleSidebar()" aria-controls="appSidebar" aria-expanded="false">☰ Menu</button>
                 <strong>{{ $title ?? 'CRM Workspace' }}</strong>
                 <span class="footer-note">Multi-tenant admissions CRM</span>
             </div>
             <div style="display:flex;align-items:center;gap:10px;">
-                <form method="GET" action="/search" class="toolbar" style="margin:0;">
-                    <input id="global-search" name="q" placeholder="Search students, applications, universities..." style="min-width:320px;">
+                <form method="GET" action="/search" class="toolbar topbar-search" role="search" style="margin:0;">
+                    <label for="topbar-search-input" class="sr-only">Search the CRM</label>
+                    <input id="topbar-search-input" type="search" name="q" value="{{ request()->is('search*') ? request('q') : '' }}" placeholder="Search students, applications, universities… (press /)" aria-keyshortcuts="/">
                     <button type="submit" class="secondary">Search</button>
                 </form>
             </div>
             <div class="topbar-actions">
-                <a class="icon-btn" title="Advanced Search" href="/search">🔎</a>
-                <button class="icon-btn" title="Notifications" onclick="toggleNotificationPanel()">
-                    🔔
+                <a class="icon-btn" title="Advanced Search" aria-label="Advanced search" href="/search"><span aria-hidden="true">🔎</span></a>
+                <button type="button" class="icon-btn" id="notifToggle" title="Notifications" aria-label="Notifications{{ $headerUnread > 0 ? ' ('.$headerUnread.' unread)' : '' }}" aria-controls="notifPanel" aria-expanded="false" onclick="toggleNotificationPanel()">
+                    <span aria-hidden="true">🔔</span>
                     @if($headerUnread > 0)
-                        <span class="notif-dot">{{ $headerUnread }}</span>
+                        <span class="notif-dot" aria-hidden="true">{{ $headerUnread }}</span>
                     @endif
                 </button>
-                <button class="icon-btn" title="Toggle Theme" onclick="toggleTheme()">🌓</button>
+                <button type="button" class="icon-btn" title="Toggle theme" aria-label="Toggle light or dark theme" onclick="toggleTheme()"><span aria-hidden="true">🌓</span></button>
             </div>
         </div>
 
-        <div id="notifPanel" class="notif-panel hidden" hidden>
+        <div id="notifPanel" class="notif-panel hidden" hidden role="region" aria-label="Recent notifications">
             <div class="notif-panel-head">
                 <strong>Notifications</strong>
                 <a href="/notifications" class="tab">Open all</a>
@@ -199,23 +201,23 @@
         </div>
 
         @if(session('success'))
-            <div id="toastSuccess" class="toast toast-success">{{ session('success') }}</div>
+            <div id="toastSuccess" class="toast toast-success" role="status" aria-live="polite">{{ session('success') }}</div>
         @endif
         @if($errors->any())
-            <dialog id="globalErrorDialog" open class="card" style="border-color:#ef4444;margin-bottom:10px;max-width:760px;width:100%;background:#fff7f7;">
+            <div id="globalErrorDialog" class="card form-error-summary" role="alert" tabindex="-1">
                 <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
                     <div>
-                        <h3 style="margin:0;color:#b91c1c;">System Error</h3>
-                        <p class="footer-note" style="margin:6px 0 0 0;">Please review the following and try again.</p>
+                        <h3 style="margin:0;">Some information needs your attention</h3>
+                        <p class="footer-note" style="margin:6px 0 0 0;">Nothing was saved. Please correct the following and try again.</p>
                     </div>
-                    <button type="button" class="secondary" onclick="document.getElementById('globalErrorDialog').close()">Close</button>
+                    <button type="button" class="secondary" aria-label="Dismiss message" onclick="document.getElementById('globalErrorDialog').remove()">Close</button>
                 </div>
-                <ul style="margin:10px 0 0 18px;color:#991b1b;line-height:1.7;">
+                <ul>
                     @foreach($errors->all() as $err)
                         <li>{{ $err }}</li>
                     @endforeach
                 </ul>
-            </dialog>
+            </div>
         @endif
 
         @yield('content')
@@ -236,7 +238,7 @@
         @elseif($can('finance.view'))
             <a class="{{ request()->is('finance*') ? 'active' : '' }}" href="/finance"><span>Finance</span></a>
         @endif
-        <button type="button" onclick="toggleSidebar()">More</button>
+        <button type="button" onclick="toggleSidebar()" aria-controls="appSidebar" aria-expanded="false">More</button>
     </nav>
 </div>
 <script>
@@ -252,12 +254,24 @@
         document.cookie = 'theme=' + next + ';path=/;max-age=31536000;samesite=lax';
     }
 
+    function setNotificationPanel(open) {
+        const panel = document.getElementById('notifPanel');
+        const toggle = document.getElementById('notifToggle');
+        if (!panel) return;
+        panel.classList.toggle('hidden', !open);
+        panel.hidden = !open;
+        if (toggle) toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+
     function toggleNotificationPanel() {
         const panel = document.getElementById('notifPanel');
-        if (panel) {
-            panel.classList.toggle('hidden');
-            panel.hidden = panel.classList.contains('hidden');
-        }
+        if (panel) setNotificationPanel(panel.hidden);
+    }
+
+    function syncSidebarToggles(open) {
+        document.querySelectorAll('[aria-controls="appSidebar"]').forEach(function (btn) {
+            btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        });
     }
 
     function toggleSidebar() {
@@ -266,6 +280,7 @@
         if (backdrop) {
             backdrop.classList.toggle('show', open);
         }
+        syncSidebarToggles(open);
     }
 
     function closeSidebar() {
@@ -274,7 +289,34 @@
         if (backdrop) {
             backdrop.classList.remove('show');
         }
+        syncSidebarToggles(false);
     }
+
+    // Keyboard support: "/" focuses global search, Escape closes overlays.
+    document.addEventListener('keydown', function (e) {
+        const t = e.target;
+        const typing = t && (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName));
+        if (e.key === '/' && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            const search = document.getElementById('topbar-search-input');
+            if (search) {
+                e.preventDefault();
+                search.focus();
+            }
+        } else if (e.key === 'Escape') {
+            const panel = document.getElementById('notifPanel');
+            if (panel && !panel.hidden) {
+                setNotificationPanel(false);
+                const toggle = document.getElementById('notifToggle');
+                if (toggle) toggle.focus();
+            }
+            if (document.body.classList.contains('sidebar-open')) closeSidebar();
+        }
+    });
+
+    (function () {
+        const summary = document.getElementById('globalErrorDialog');
+        if (summary && !document.querySelector('dialog[open]')) summary.focus();
+    })();
 
     document.querySelectorAll('.sidebar .nav-link').forEach(function (link) {
         link.addEventListener('click', closeSidebar);

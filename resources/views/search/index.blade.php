@@ -67,7 +67,7 @@
         <select name="stage">
             <option value="">Student stage</option>
             @foreach(['lead','inquiry','applicant','documents_pending','interview_scheduled','admitted','visa_process','tuition_paid','enrolled','alumni'] as $st)
-                <option value="{{ $st }}" {{ $stage === $st ? 'selected' : '' }}>{{ ucfirst($st) }}</option>
+                <option value="{{ $st }}" {{ $stage === $st ? 'selected' : '' }}>{{ ucfirst(str_replace('_', ' ', $st)) }}</option>
             @endforeach
         </select>
 

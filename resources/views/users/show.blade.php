@@ -19,7 +19,7 @@
             <tr>
                 <td>{{ $student->full_name }}</td>
                 <td>{{ $student->email }}</td>
-                <td><span class="badge {{ $student->stage }}">{{ ucfirst($student->stage) }}</span></td>
+                <td><span class="badge {{ $student->stage }}">{{ ucfirst(str_replace('_', ' ', $student->stage)) }}</span></td>
                 <td><a class="tab" href="/students/{{ $student->id }}">Open</a></td>
             </tr>
         @empty

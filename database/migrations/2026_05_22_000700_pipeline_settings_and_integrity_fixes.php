@@ -20,13 +20,22 @@ return new class extends Migration {
         }
 
         if (Schema::hasTable('applications')) {
-            Schema::table('applications', function (Blueprint $table): void {
-                $table->index(['tenant_id', 'student_id'], 'applications_tenant_student_idx');
-                $table->index(['tenant_id', 'university_id', 'program'], 'applications_tenant_uni_program_idx');
+            // Guarded so a partially applied run (MySQL DDL is not transactional) can be retried.
+            $hasStudentIdx = Schema::hasIndex('applications', 'applications_tenant_student_idx');
+            $hasProgramIdx = Schema::hasIndex('applications', 'applications_tenant_uni_program_idx');
+            Schema::table('applications', function (Blueprint $table) use ($hasStudentIdx, $hasProgramIdx): void {
+                if (! $hasStudentIdx) {
+                    $table->index(['tenant_id', 'student_id'], 'applications_tenant_student_idx');
+                }
+                if (! $hasProgramIdx) {
+                    $table->index(['tenant_id', 'university_id', 'program'], 'applications_tenant_uni_program_idx');
+                }
             });
         }
 
-        if (Schema::hasTable('student_messages')) {
+        // 2026_04_17_000002 already uses this index name (on tenant_id, student_user_id) on fresh installs.
+        if (Schema::hasTable('student_messages') && Schema::hasColumn('student_messages', 'student_id')
+            && ! Schema::hasIndex('student_messages', 'student_messages_tenant_student_idx')) {
             Schema::table('student_messages', function (Blueprint $table): void {
                 $table->index(['tenant_id', 'student_id'], 'student_messages_tenant_student_idx');
             });
