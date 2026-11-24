@@ -33,17 +33,18 @@ class StudentController extends Controller
     ) {
     }
 
-    public function index(Request $request): View
+    /**
+     * Same filters, tenant scope and agent ownership as the Students list.
+     */
+    private function listQuery(Request $request, $user)
     {
-        $user = $this->authUser($request);
         $q = (string) $request->query('q', '');
         $stage = (string) $request->query('stage', '');
         $country = (string) $request->query('country', '');
         $gpaMin = $request->query('gpa_min');
         $gpaMax = $request->query('gpa_max');
-        $perPage = $this->perPage($request);
 
-        $students = Student::query()
+        return Student::query()
             ->forTenant($user->tenant_id, $user->role_slug)
             ->whereNull('deleted_at')
             ->when(in_array($user->role_slug, ['agent', 'sub_agent'], true) && !$user->hasPermission('students.view_all'), function ($query) use ($user) {
@@ -64,7 +65,79 @@ class StudentController extends Controller
             ->when($country !== '', fn ($query) => $query->where('target_country', 'like', "%{$country}%"))
             ->when($gpaMin !== null && $gpaMin !== '', fn ($query) => $query->where('gpa', '>=', (float) $gpaMin))
             ->when($gpaMax !== null && $gpaMax !== '', fn ($query) => $query->where('gpa', '<=', (float) $gpaMax))
-            ->latest('id')
+            ->latest('id');
+    }
+
+    public function export(Request $request): \Symfony\Component\HttpFoundation\Response
+    {
+        $user = $this->authUser($request);
+        $format = (string) $request->query('format', 'xlsx');
+
+        $columns = [
+            ['label' => 'Student', 'type' => 'string'],
+            ['label' => 'Email', 'type' => 'string'],
+            ['label' => 'Phone', 'type' => 'string'],
+            ['label' => 'Nationality', 'type' => 'string'],
+            ['label' => 'GPA', 'type' => 'decimal'],
+            ['label' => 'English Level', 'type' => 'string'],
+            ['label' => 'Field of Study', 'type' => 'string'],
+            ['label' => 'University Language', 'type' => 'string'],
+            ['label' => 'Target Country', 'type' => 'string'],
+            ['label' => 'Budget (USD)', 'type' => 'money'],
+            ['label' => 'Stage', 'type' => 'string'],
+            ['label' => 'Lifecycle', 'type' => 'string'],
+            ['label' => 'Lead Source', 'type' => 'string'],
+            ['label' => 'Agent', 'type' => 'string'],
+            ['label' => 'Sub-Agent', 'type' => 'string'],
+            ['label' => 'Portal Login', 'type' => 'string'],
+            ['label' => 'Created At', 'type' => 'datetime'],
+        ];
+        $languages = ['en' => 'English', 'tr' => 'Turkish'];
+
+        // Passport numbers and passwords are intentionally never exported.
+        $rows = $this->listQuery($request, $user)->lazy(500)->map(fn (Student $s) => [
+            $s->full_name,
+            $s->email,
+            $s->phone,
+            $s->nationality,
+            $s->gpa,
+            $s->english_level,
+            $s->field_of_study,
+            $languages[$s->preferred_university_language ?? ''] ?? ($s->preferred_university_language ?? ''),
+            $s->target_country,
+            $s->budget_usd,
+            \App\Support\Export\SpreadsheetExport::human($s->stage),
+            \App\Support\Export\SpreadsheetExport::human($s->lifecycle_stage),
+            \App\Support\Export\SpreadsheetExport::human($s->lead_source),
+            $s->agent?->name,
+            $s->subAgent?->name,
+            (int) $s->is_active === 1 ? 'Active' : 'Inactive',
+            $s->created_at,
+        ]);
+
+        $export = \App\Support\Export\SpreadsheetExport::make('Students', $columns, $rows, [
+            'Search' => (string) $request->query('q', ''),
+            'Stage' => \App\Support\Export\SpreadsheetExport::human((string) $request->query('stage', '')),
+            'Country' => (string) $request->query('country', ''),
+            'GPA min' => (string) $request->query('gpa_min', ''),
+            'GPA max' => (string) $request->query('gpa_max', ''),
+        ]);
+        $this->audit($request, 'student.export', 'student', 0, ['filters' => array_filter($request->only(['q', 'stage', 'country', 'gpa_min', 'gpa_max']))]);
+
+        return $format === 'csv' ? $export->csv('students') : $export->download('students');
+    }
+
+    public function index(Request $request): View
+    {
+        $user = $this->authUser($request);
+        $q = (string) $request->query('q', '');
+        $stage = (string) $request->query('stage', '');
+        $country = (string) $request->query('country', '');
+        $gpaMin = $request->query('gpa_min');
+        $gpaMax = $request->query('gpa_max');
+        $perPage = $this->perPage($request);
+
+        $students = $this->listQuery($request, $user)
             ->paginate($perPage)
             ->withQueryString();
 

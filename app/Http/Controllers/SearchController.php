@@ -2,6 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Support\Export\SpreadsheetExport;
+use Symfony\Component\HttpFoundation\Response as HttpResponse;
+
 use App\Models\Application;
 use App\Models\Student;
 use App\Models\University;
@@ -22,7 +25,7 @@ class SearchController extends Controller
         'PhD' => ['PhD', 'Doctorate', 'دکتری', 'دکترا'],
     ];
 
-    public function index(Request $request): View|StreamedResponse
+    public function index(Request $request): View|HttpResponse
     {
         $user = $this->authUser($request);
         $q = trim((string) $request->query('q', ''));
@@ -181,16 +184,17 @@ class SearchController extends Controller
             ->when(is_array($programUniversityIds) && !empty($programUniversityIds), fn ($query) => $query->whereIn('id', $programUniversityIds))
             ->when(is_array($programUniversityIds) && empty($programUniversityIds) && ($degree !== '' || $studyField !== ''), fn ($query) => $query->whereRaw('1 = 0'))
             ->orderBy('name')
-            ->orderBy('id')
-            ->limit(20)
-            ->get();
+            ->orderBy('id');
 
         if ($export === 'universities') {
-            return $this->exportUniversities($universities);
+            // Export every matching university (the screen only previews the first 20).
+            return $this->exportUniversities((clone $universities)->limit(5000)->get(), $request);
         }
+        $universities = $universities->limit(20)->get();
         if ($export === 'programs') {
             return $this->exportPrograms(
-                $user->tenant_id,
+                $user,
+                $request,
                 $keywords,
                 $countryUniversity,
                 $universityId,
@@ -384,8 +388,7 @@ class SearchController extends Controller
                     ->from('universities')
                     ->whereColumn('universities.id', 'university_programs.university_id')
                     ->where('universities.tenant_id', $user->tenant_id)
-                    ->where('universities.is_active', 1)
-                    ->when(in_array($user->role_slug, ['agent', 'sub_agent'], true) && !$user->hasPermission('universities.view_all'), fn ($q) => $q->where('universities.created_by_user_id', $user->id));
+                        ->when(in_array($user->role_slug, ['agent', 'sub_agent'], true) && !$user->hasPermission('universities.view_all'), fn ($q) => $q->where('universities.created_by_user_id', $user->id));
             })
             ->when($degree !== '', fn ($q) => $q->where('degree_level', $degree))
             ->when($hasThesisColumn && in_array($thesisType, ['thesis', 'non_thesis', 'both'], true), fn ($q) => $q->where(function ($sub) use ($thesisType) {
@@ -405,48 +408,75 @@ class SearchController extends Controller
         return response()->json($rows);
     }
 
-    private function exportUniversities($rows): StreamedResponse
+    private function exportUniversities($rows, Request $request): HttpResponse
     {
-        $response = new StreamedResponse(function () use ($rows): void {
-            $out = fopen('php://output', 'w');
-            $universityIds = collect($rows)->pluck('id')->filter()->values()->all();
-            $programLangMap = [];
-            if (!empty($universityIds) && Schema::hasTable('university_programs')) {
+        $programLangMap = [];
+        $programCountMap = [];
+        $universityIds = collect($rows)->pluck('id')->filter()->values()->all();
+        if (!empty($universityIds) && Schema::hasTable('university_programs')) {
+            foreach (array_chunk($universityIds, 1000) as $chunk) {
                 $langRows = DB::table('university_programs')
-                    ->whereIn('university_id', $universityIds)
-                    ->whereNotNull('language')
-                    ->where('language', '!=', '')
+                    ->whereIn('university_id', $chunk)
                     ->select('university_id', 'language')
                     ->get();
                 foreach ($langRows as $langRow) {
-                    $programLangMap[$langRow->university_id] ??= [];
-                    $programLangMap[$langRow->university_id][] = $langRow->language;
-                }
-                foreach ($programLangMap as $key => $langs) {
-                    $programLangMap[$key] = implode(', ', array_values(array_unique($langs)));
+                    $programCountMap[$langRow->university_id] = ($programCountMap[$langRow->university_id] ?? 0) + 1;
+                    if (trim((string) $langRow->language) !== '') {
+                        $programLangMap[$langRow->university_id][$langRow->language] = true;
+                    }
                 }
             }
-            fputcsv($out, ['Name', 'Country', 'City', 'Type', 'University Language', 'Program Languages', 'Programs']);
-            foreach ($rows as $row) {
-                fputcsv($out, [
-                    $row->name,
-                    $row->country,
-                    $row->city ?? '',
-                    $row->institution_type ?? '',
-                    $row->language ?? '',
-                    $programLangMap[$row->id] ?? '',
-                    $row->programs_summary ?? '',
-                ]);
+        }
+
+        $columns = [
+            ['label' => 'University', 'type' => 'string'],
+            ['label' => 'Country', 'type' => 'string'],
+            ['label' => 'City', 'type' => 'string'],
+            ['label' => 'Type', 'type' => 'string'],
+            ['label' => 'University Language', 'type' => 'string'],
+            ['label' => 'Program Languages', 'type' => 'string'],
+            ['label' => 'Programs (count)', 'type' => 'integer'],
+            ['label' => 'Programs Summary', 'type' => 'string', 'width' => 60],
+        ];
+
+        $data = collect($rows)->map(fn ($row) => [
+            $row->name,
+            $row->country,
+            $row->city ?? '',
+            SpreadsheetExport::human($row->institution_type ?? ''),
+            $row->language ?? '',
+            implode(', ', array_keys($programLangMap[$row->id] ?? [])),
+            $programCountMap[$row->id] ?? 0,
+            $row->programs_summary ?? '',
+        ]);
+
+        return SpreadsheetExport::make('University Search Results', $columns, $data, $this->exportFilters($request))
+            ->download('universities');
+    }
+
+    /** Active search filters, labelled for the export header. */
+    private function exportFilters(Request $request): array
+    {
+        $labels = [
+            'q' => 'Keywords', 'country_university' => 'Country', 'city_university' => 'City',
+            'university_name' => 'University', 'university_type' => 'Type', 'degree' => 'Degree',
+            'study_field' => 'Field', 'program_name' => 'Program', 'thesis_type' => 'Thesis',
+            'program_language' => 'Language',
+        ];
+        $filters = [];
+        foreach ($labels as $key => $label) {
+            $value = trim((string) $request->query($key, ''));
+            if ($value !== '') {
+                $filters[$label] = SpreadsheetExport::human($value);
             }
-            fclose($out);
-        });
-        $response->headers->set('Content-Type', 'text/csv');
-        $response->headers->set('Content-Disposition', 'attachment; filename="universities-search.csv"');
-        return $response;
+        }
+
+        return $filters;
     }
 
     private function exportPrograms(
-        int $tenantId,
+        $user,
+        Request $request,
         string $keywords,
         string $countryUniversity,
         int $universityId,
@@ -455,8 +485,9 @@ class SearchController extends Controller
         string $programName,
         string $thesisType,
         string $programLanguage
-    ): StreamedResponse
+    ): HttpResponse
     {
+        $tenantId = (int) $user->tenant_id;
         $rows = collect();
         if (Schema::hasTable('university_programs')) {
             $hasThesisColumn = Schema::hasColumn('university_programs', 'thesis_type');
@@ -478,12 +509,27 @@ class SearchController extends Controller
             if ($hasFeeTypeColumn) {
                 $columns[] = 'university_programs.fee_type';
             }
+            foreach (['duration', 'currency', 'discounted_fee_full', 'discounted_fee_installment'] as $optional) {
+                if (Schema::hasColumn('university_programs', $optional)) {
+                    $columns[] = 'university_programs.'.$optional;
+                }
+            }
+            // University-level defaults, used when a program has no language/tuition of its own.
+            $columns[] = 'universities.language as university_language';
+            $columns[] = 'universities.currency as university_currency';
+            $columns[] = 'universities.tuition_range as university_tuition_range';
+            if (Schema::hasColumn('universities', 'tuition_fee_type')) {
+                $columns[] = 'universities.tuition_fee_type as university_fee_type';
+            }
+            $columns[] = 'university_programs.notes';
             $rows = DB::table('university_programs')
                 ->join('universities', function ($join) use ($tenantId) {
                     $join->on('universities.id', '=', 'university_programs.university_id')
                         ->where('universities.tenant_id', '=', $tenantId);
                 })
                 ->where('university_programs.tenant_id', $tenantId)
+                // Same visibility rule as the university list: agents only see universities they created.
+                ->when(in_array($user->role_slug, ['agent', 'sub_agent'], true) && !$user->hasPermission('universities.view_all'), fn ($query) => $query->where('universities.created_by_user_id', $user->id))
                 ->when(!empty($keywordVariants), function ($query) use ($keywordVariants) {
                     $query->where(function ($sub) use ($keywordVariants) {
                         foreach ($keywordVariants as $term) {
@@ -496,6 +542,18 @@ class SearchController extends Controller
                     });
                 })
                 ->when($countryUniversity !== '', fn ($query) => $query->where('universities.country', $countryUniversity))
+                // Same university filters as the on-screen list (previously ignored, so the export
+                // mixed in programs from universities the user had filtered out).
+                ->when(trim((string) $request->query('university_name', '')) !== '', fn ($query) => $query->where('universities.name', 'like', '%'.trim((string) $request->query('university_name')).'%'))
+                ->when(trim((string) $request->query('city_university', '')) !== '', function ($query) use ($request) {
+                    $city = trim((string) $request->query('city_university'));
+                    if (Schema::hasColumn('universities', 'city')) {
+                        $query->where('universities.city', $city);
+                    } else {
+                        $query->where(fn ($sub) => $sub->where('universities.name', 'like', "%{$city}%")->orWhere('universities.description', 'like', "%{$city}%"));
+                    }
+                })
+                ->when(trim((string) $request->query('university_type', '')) !== '' && Schema::hasColumn('universities', 'institution_type'), fn ($query) => $query->whereRaw('LOWER(universities.institution_type) = ?', [mb_strtolower(trim((string) $request->query('university_type')))]))
                 ->when($universityId > 0, fn ($query) => $query->where('university_programs.university_id', $universityId))
                 ->when($degree !== '', function ($query) use ($degreeAliases) {
                     $query->where(function ($sub) use ($degreeAliases) {
@@ -517,27 +575,69 @@ class SearchController extends Controller
                 ->limit(3000)
                 ->get($columns);
         }
-        $response = new StreamedResponse(function () use ($rows): void {
-            $out = fopen('php://output', 'w');
-            fputcsv($out, ['University ID', 'University', 'Country', 'Program', 'Degree', 'Thesis Type', 'Tuition', 'Tuition Type', 'Language']);
-            foreach ($rows as $row) {
-                fputcsv($out, [
-                    $row->university_id ?? '',
-                    $row->university_name ?? '',
-                    $row->country ?? '',
-                    $row->program_name ?? '',
-                    $row->degree_level ?? '',
-                    $row->thesis_type ?? '',
-                    $row->fee ?? '',
-                    $this->feeTypeLabel($row->fee_type ?? ''),
-                    $row->language ?? '',
-                ]);
+        $columns = [
+            ['label' => 'University', 'type' => 'string'],
+            ['label' => 'Country', 'type' => 'string'],
+            ['label' => 'Program', 'type' => 'string'],
+            ['label' => 'Degree', 'type' => 'string'],
+            ['label' => 'Thesis Type', 'type' => 'string'],
+            ['label' => 'Language', 'type' => 'string'],
+            ['label' => 'Duration', 'type' => 'string'],
+            ['label' => 'Currency', 'type' => 'string'],
+            ['label' => 'Tuition', 'type' => 'money'],
+            ['label' => 'Tuition Basis', 'type' => 'string'],
+            ['label' => 'Discounted (Full Payment)', 'type' => 'money'],
+            ['label' => 'Discounted (Installments)', 'type' => 'money'],
+            ['label' => 'University Tuition Range', 'type' => 'string'],
+            ['label' => 'Data Notes', 'type' => 'string', 'width' => 46],
+        ];
+        $data = $rows->map(function ($row) {
+            $notes = [];
+            $language = trim((string) ($row->language ?? ''));
+            if ($language === '' && preg_match('/Language as imported: ([^|]+)/u', (string) ($row->notes ?? ''), $m)) {
+                $language = trim($m[1]);
+                $notes[] = 'Language as typed on import';
             }
-            fclose($out);
+            if ($language === '' && trim((string) ($row->university_language ?? '')) !== '') {
+                $language = (string) $row->university_language;
+                $notes[] = 'Language from university profile';
+            }
+            $currency = trim((string) ($row->currency ?? '')) ?: (string) ($row->university_currency ?? '');
+            $fee = $row->fee ?? null;
+            $range = trim((string) ($row->university_tuition_range ?? ''));
+            $feeType = $this->feeTypeLabel($row->fee_type ?? '');
+            if ($fee === null || $fee === '') {
+                if ($feeType === '') {
+                    $feeType = $this->feeTypeLabel($row->university_fee_type ?? '');
+                }
+                $notes[] = $range !== '' ? 'No program tuition — see university range' : 'Tuition missing';
+            } elseif ((float) $fee > 0 && (float) $fee < 100) {
+                $notes[] = 'Tuition looks too low — please verify';
+            }
+            if ($language === '') {
+                $notes[] = 'Language missing';
+            }
+
+            return [
+                $row->university_name ?? '',
+                $row->country ?? '',
+                $row->program_name ?? '',
+                $row->degree_level ?? '',
+                SpreadsheetExport::human($row->thesis_type ?? ''),
+                $language,
+                $row->duration ?? '',
+                $currency,
+                $fee,
+                $feeType,
+                $row->discounted_fee_full ?? '',
+                $row->discounted_fee_installment ?? '',
+                $range,
+                implode('; ', $notes),
+            ];
         });
-        $response->headers->set('Content-Type', 'text/csv');
-        $response->headers->set('Content-Disposition', 'attachment; filename="programs-search.csv"');
-        return $response;
+
+        return SpreadsheetExport::make('Program Search Results', $columns, $data, $this->exportFilters($request))
+            ->download('programs');
     }
 
     private function normalizeDegreeOptions(array $raw): array

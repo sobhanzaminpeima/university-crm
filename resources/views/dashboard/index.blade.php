@@ -86,7 +86,7 @@
                 <tr>
                     <td>{{ $student->full_name }}</td>
                     <td>{{ $student->nationality ?: '-' }}</td>
-                    <td><span class="badge {{ $student->stage }}">{{ ucfirst($student->stage) }}</span></td>
+                    <td><span class="badge {{ $student->stage }}">{{ ucfirst(str_replace('_', ' ', $student->stage)) }}</span></td>
                     <td class="{{ $student->stage_temperature }}">{{ ucfirst($student->stage_temperature ?: 'cold') }}</td>
                     <td><a href="/students/{{ $student->id }}">More info</a></td>
                 </tr>

@@ -5,7 +5,7 @@
 <div class="card">
     <div class="toolbar">
         <form method="GET" action="/applications" class="toolbar grow">
-            <input id="global-search" name="q" value="{{ $q }}" placeholder="Search student/program/university/notes">
+            <input id="application-search" type="search" aria-label="Search applications" name="q" value="{{ $q }}" placeholder="Search student/program/university/notes">
             <select name="university_sort">
                 <option value="name_asc" {{ ($universitySort ?? 'name_asc') === 'name_asc' ? 'selected' : '' }}>University A-Z</option>
                 <option value="name_desc" {{ ($universitySort ?? '') === 'name_desc' ? 'selected' : '' }}>University Z-A</option>
@@ -26,6 +26,11 @@
         </form>
         <button onclick="document.getElementById('addApp').showModal()">+ Add Application</button>
     </div>
+    @include('partials.export-buttons', [
+        'xlsx' => '/applications/export?'.http_build_query(request()->except(['page', 'per_page'])),
+        'csv' => '/applications/export?'.http_build_query(array_merge(request()->except(['page', 'per_page']), ['format' => 'csv'])),
+        'note' => 'Exports every application matching the current search and status filter.',
+    ])
     <table class="table-compact">
         <thead><tr><th>ID</th><th>Student</th><th>University</th><th>Program</th><th>Status</th><th>Enroll %</th><th>Next Action</th><th>Actions</th></tr></thead>
         <tbody>
