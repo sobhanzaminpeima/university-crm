@@ -6,7 +6,7 @@ Pushing to GitHub does **not** deploy. The owner deploys manually with the separ
 
 - **Batch 1:** UX fixes (labelled student forms, error presentation, accessibility). Migration `2026_05_22_000700` was also made idempotent.
 - **Batch 2:** Real XLSX exports, a categorized sidebar, and Telegram bot security and setup fixes.
-- **Database:** no new tables or columns. The only migration change is the guard in `2026_05_22_000700`. It only skips creating indexes that already exist, so it changes nothing on a database where it has already run.
+- **Database:** batches 1–2 add no tables or columns, and batch 3 adds two nullable columns only if they are missing (see below). The other migration change is the guard in `2026_05_22_000700`. It only skips creating indexes that already exist, so it changes nothing on a database where it has already run.
 - **New PHP requirements:** `ext-zip` (for XLSX) and `ext-fileinfo` (for bot upload checks). Both are enabled by default on Hostinger. Without `ext-zip`, exports fall back to a clearly labelled CSV file.
 
 ## Before deploying
@@ -48,7 +48,7 @@ Pushing to GitHub does **not** deploy. The owner deploys manually with the separ
 1. Redeploy the previous commit.
 2. Rebuild the caches as in "Deploy" step 3.
 
-No database rollback is needed, because there are no schema changes. If the webhook was connected and you roll back, it keeps working, because the old code accepts the same URL.
+No database rollback is needed. The only schema change, in batch 3, adds two nullable columns if they are missing; older code ignores them, so they can stay. If the webhook was connected and you roll back, it keeps working, because the old code accepts the same URL.
 
 ## Batch 3 additions (program tuition/language)
 
