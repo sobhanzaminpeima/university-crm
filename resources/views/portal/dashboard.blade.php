@@ -23,7 +23,11 @@
         @if(session('telegram_code'))
             <div class="card" style="border-color:#0ea5e9;background:#f0f9ff;margin-bottom:10px;">
                 <p style="margin:0 0 6px;">Send this to the bot on Telegram:</p>
-                <p style="font-size:20px;font-weight:800;letter-spacing:.08em;margin:0;">/link {{ session('telegram_code') }}</p>
+                <p style="font-size:20px;font-weight:800;letter-spacing:.08em;margin:0;" dir="ltr">/link {{ session('telegram_code') }}</p>
+                @php($portalBot = app(\App\Services\TelegramBotService::class)->botUsername())
+                @if($portalBot)
+                    <p style="margin:10px 0 0;"><a class="tg-btn" href="https://t.me/{{ $portalBot }}?start=link_{{ session('telegram_code') }}" target="_blank" rel="noopener">Open Telegram &amp; connect</a></p>
+                @endif
                 <p class="footer-note" style="margin:6px 0 0;">Expires in 10 minutes.</p>
             </div>
         @endif

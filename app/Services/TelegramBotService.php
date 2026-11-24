@@ -32,27 +32,180 @@ class TelegramBotService
         return !empty($this->token);
     }
 
-    public function sendMessage(string $chatId, string $text, array $extra = []): void
+    public function sendMessage(string $chatId, string $text, array $extra = []): bool
     {
         if (!$this->isConfigured()) {
-            return;
+            return false;
+        }
+
+        $payload = array_merge([
+            'chat_id' => $chatId,
+            'text' => $this->safeHtml($text),
+            'parse_mode' => 'HTML',
+            'disable_web_page_preview' => true,
+        ], $extra);
+
+        $response = $this->api('sendMessage', $payload);
+        if ($response['ok']) {
+            return true;
+        }
+
+        // If Telegram cannot parse the formatting (e.g. unbalanced tags in user data), resend as plain text
+        // instead of silently losing the message.
+        if (str_contains(strtolower((string) $response['description']), "can't parse entities")) {
+            $payload['text'] = html_entity_decode(strip_tags($payload['text']), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            unset($payload['parse_mode']);
+
+            return $this->api('sendMessage', $payload)['ok'];
+        }
+
+        return false;
+    }
+
+    /**
+     * Messages are built with a few formatting tags (<b>, <i>, <code>...) around values that come from
+     * users (student names, messages, search terms). Escape everything, then restore only the plain
+     * formatting tags we use. Links and any other markup coming from user data are therefore shown as
+     * text and cannot become clickable phishing links or break Telegram's HTML parser.
+     */
+    public function safeHtml(string $text): string
+    {
+        $escaped = htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8', false);
+
+        return (string) preg_replace('#&lt;(/?)(b|i|u|s|code|pre)&gt;#i', '<$1$2>', $escaped);
+    }
+
+    /**
+     * Single entry point for Bot API calls. Never throws, never logs the bot token.
+     *
+     * @return array{ok: bool, result: mixed, description: ?string, error_code: ?int}
+     */
+    public function api(string $method, array $params = [], int $timeout = 8): array
+    {
+        if (!$this->isConfigured()) {
+            return ['ok' => false, 'result' => null, 'description' => 'Bot token is not configured.', 'error_code' => null];
         }
         try {
-            Http::asForm()->post("https://api.telegram.org/bot{$this->token}/sendMessage", array_merge([
-                'chat_id' => $chatId,
-                'text' => $text,
-                'parse_mode' => 'HTML',
-                'disable_web_page_preview' => true,
-            ], $extra));
+            $response = Http::asForm()->timeout($timeout)->post("https://api.telegram.org/bot{$this->token}/{$method}", $params);
+            $json = $response->json() ?? [];
+            $result = [
+                'ok' => (bool) ($json['ok'] ?? false),
+                'result' => $json['result'] ?? null,
+                'description' => $json['description'] ?? ($response->successful() ? null : 'HTTP '.$response->status()),
+                'error_code' => $json['error_code'] ?? ($response->successful() ? null : $response->status()),
+            ];
+            if (!$result['ok']) {
+                Log::warning('Telegram API call failed', ['method' => $method, 'error_code' => $result['error_code'], 'description' => $result['description']]);
+            }
+
+            return $result;
         } catch (\Throwable $e) {
-            Log::warning('Telegram sendMessage failed: '.$e->getMessage());
+            $message = str_replace((string) $this->token, '***', $e->getMessage());
+            Log::warning('Telegram API call error', ['method' => $method, 'error' => $message]);
+
+            return ['ok' => false, 'result' => null, 'description' => $message, 'error_code' => null];
         }
     }
 
-    public function registerCommands(): void
+    public function getMe(): array
+    {
+        return $this->api('getMe');
+    }
+
+    public function getWebhookInfo(): array
+    {
+        return $this->api('getWebhookInfo');
+    }
+
+    public function webhookUrl(): ?string
+    {
+        $secret = (string) config('services.telegram.webhook_secret');
+        if ($secret === '') {
+            return null;
+        }
+
+        return rtrim((string) config('app.url'), '/').'/telegram/webhook/'.$secret;
+    }
+
+    public function setWebhook(): array
+    {
+        $url = $this->webhookUrl();
+        if ($url === null) {
+            return ['ok' => false, 'result' => null, 'description' => 'TELEGRAM_WEBHOOK_SECRET is not set.', 'error_code' => null];
+        }
+        $params = [
+            'url' => $url,
+            'allowed_updates' => json_encode(['message', 'callback_query']),
+            'max_connections' => 20,
+        ];
+        $headerSecret = (string) config('services.telegram.webhook_header_secret');
+        if ($headerSecret !== '') {
+            $params['secret_token'] = $headerSecret;
+        }
+
+        return $this->api('setWebhook', $params);
+    }
+
+    public function deleteWebhook(): array
+    {
+        return $this->api('deleteWebhook', ['drop_pending_updates' => 'false']);
+    }
+
+    /** The bot's public username (cached), used for one-tap t.me deep links. */
+    public function botUsername(): ?string
     {
         if (!$this->isConfigured()) {
-            return;
+            return null;
+        }
+
+        return \Illuminate\Support\Facades\Cache::remember('telegram-bot-username', now()->addHours(6), function () {
+            $me = $this->getMe();
+
+            return $me['ok'] ? ($me['result']['username'] ?? null) : null;
+        });
+    }
+
+    /** Agents/sub-agents only reach their own students unless granted students.view_all. */
+    private function canAccessStudent(User $user, ?Student $student): bool
+    {
+        if (!$student) {
+            return false;
+        }
+        if (in_array($user->role_slug, ['agent', 'sub_agent'], true) && !$user->hasPermission('students.view_all')) {
+            return $user->role_slug === 'agent'
+                ? (int) $student->agent_id === (int) $user->id
+                : (int) $student->sub_agent_id === (int) $user->id;
+        }
+
+        return true;
+    }
+
+    private function canAccessApplication(User $user, Application $application): bool
+    {
+        if (in_array($user->role_slug, ['agent', 'sub_agent'], true) && !$user->hasPermission('applications.view_all')) {
+            $student = Student::query()->where('tenant_id', $user->tenant_id)->find($application->student_id);
+
+            return $student !== null && ($user->role_slug === 'agent'
+                ? (int) $student->agent_id === (int) $user->id
+                : (int) $student->sub_agent_id === (int) $user->id);
+        }
+
+        return true;
+    }
+
+    private function denyUnless(string $chatId, bool $allowed): bool
+    {
+        if (!$allowed) {
+            $this->sendMessage($chatId, '⛔ شما اجازه‌ی این کار را ندارید.');
+        }
+
+        return !$allowed;
+    }
+
+    public function registerCommands(): bool
+    {
+        if (!$this->isConfigured()) {
+            return false;
         }
         $commands = [
             ['command' => 'menu', 'description' => 'نمایش منو'],
@@ -76,13 +229,7 @@ class TelegramBotService
             ['command' => 'unlink', 'description' => 'قطع اتصال حساب'],
             ['command' => 'cancel', 'description' => 'لغو عملیات جاری'],
         ];
-        try {
-            Http::asForm()->post("https://api.telegram.org/bot{$this->token}/setMyCommands", [
-                'commands' => json_encode($commands),
-            ]);
-        } catch (\Throwable $e) {
-            Log::warning('Telegram setMyCommands failed: '.$e->getMessage());
-        }
+        return $this->api('setMyCommands', ['commands' => json_encode($commands, JSON_UNESCAPED_UNICODE)])['ok'];
     }
 
     private function inlineMenuFor(User $user): string
@@ -115,13 +262,7 @@ class TelegramBotService
         if (!$this->isConfigured()) {
             return;
         }
-        try {
-            Http::asForm()->post("https://api.telegram.org/bot{$this->token}/answerCallbackQuery", [
-                'callback_query_id' => $callbackId,
-            ]);
-        } catch (\Throwable $e) {
-            Log::warning('Telegram answerCallbackQuery failed: '.$e->getMessage());
-        }
+        $this->api('answerCallbackQuery', ['callback_query_id' => $callbackId], 5);
     }
 
     public function notifyUser(int $userId, string $text): void
@@ -154,11 +295,12 @@ class TelegramBotService
         if (!$this->isConfigured()) {
             return [];
         }
-        $response = Http::timeout(35)->get("https://api.telegram.org/bot{$this->token}/getUpdates", [
-            'offset' => $offset,
-            'timeout' => 30,
-        ]);
-        return $response->json('result') ?? [];
+        $response = $this->api('getUpdates', ['offset' => $offset, 'timeout' => 30], 40);
+        if (!$response['ok']) {
+            throw new \RuntimeException((string) ($response['description'] ?? 'getUpdates failed'), (int) ($response['error_code'] ?? 0));
+        }
+
+        return is_array($response['result']) ? $response['result'] : [];
     }
 
     public function handleUpdate(array $update): void
@@ -193,6 +335,11 @@ class TelegramBotService
         $arg = trim($arg);
 
         if ($command === '/start') {
+            // One-tap linking from the CRM: t.me/<bot>?start=link_<code>
+            if (preg_match('/^link_(\d{6})$/', $arg, $m)) {
+                $this->handleLink($chatId, $m[1], $telegramUsername);
+                return;
+            }
             $this->handleStart($chatId, $user);
             return;
         }
@@ -403,6 +550,9 @@ class TelegramBotService
             $this->sendMessage($chatId, 'این دستور برای نقش شما در دسترس نیست. /menu رو امتحان کن.');
             return;
         }
+        if ($this->denyUnless($chatId, $user->hasPermission('students.view'))) {
+            return;
+        }
         $query = Student::query()->forTenant($user->tenant_id, $user->role_slug)->whereNull('deleted_at');
         if (in_array($user->role_slug, ['agent', 'sub_agent'], true) && !$user->hasPermission('students.view_all')) {
             $query->when($user->role_slug === 'agent', fn ($q) => $q->where('agent_id', $user->id))
@@ -430,7 +580,7 @@ class TelegramBotService
 
     private function startMoveStage(string $chatId, User $user, string $arg): void
     {
-        if (!$user->hasPermission('applications.update')) {
+        if ($user->role_slug === 'student' || !$user->hasPermission('applications.update')) {
             $this->sendMessage($chatId, 'شما اجازه‌ی ویرایش اپلیکیشن‌ها رو ندارید.');
             return;
         }
@@ -440,7 +590,7 @@ class TelegramBotService
             return;
         }
         $application = Application::query()->forTenant($user->tenant_id, $user->role_slug)->find($appId);
-        if (!$application) {
+        if (!$application || !$this->canAccessApplication($user, $application)) {
             $this->sendMessage($chatId, "اپلیکیشن #{$appId} پیدا نشد.");
             return;
         }
@@ -464,7 +614,7 @@ class TelegramBotService
 
     private function setApplicationStage(string $chatId, User $user, int $appId, string $status): void
     {
-        if (!$user->hasPermission('applications.update')) {
+        if ($user->role_slug === 'student' || !$user->hasPermission('applications.update')) {
             $this->sendMessage($chatId, 'شما اجازه‌ی ویرایش اپلیکیشن‌ها رو ندارید.');
             return;
         }
@@ -473,7 +623,7 @@ class TelegramBotService
             return;
         }
         $application = Application::query()->forTenant($user->tenant_id, $user->role_slug)->find($appId);
-        if (!$application) {
+        if (!$application || !$this->canAccessApplication($user, $application)) {
             $this->sendMessage($chatId, "اپلیکیشن #{$appId} پیدا نشد.");
             return;
         }
@@ -487,6 +637,9 @@ class TelegramBotService
     {
         if ($user->role_slug === 'student') {
             $this->sendMessage($chatId, 'این دستور برای نقش شما در دسترس نیست.');
+            return;
+        }
+        if ($this->denyUnless($chatId, $user->hasPermission('students.view'))) {
             return;
         }
         $query = trim($query);
@@ -524,6 +677,9 @@ class TelegramBotService
     {
         if ($user->role_slug === 'student') {
             $this->sendMessage($chatId, '/myapplications رو امتحان کن.');
+            return;
+        }
+        if ($this->denyUnless($chatId, $user->hasPermission('applications.view'))) {
             return;
         }
         $query = Application::query()
@@ -578,6 +734,9 @@ class TelegramBotService
     {
         if ($user->role_slug === 'student') {
             $this->sendMessage($chatId, '/myapplications رو امتحان کن.');
+            return;
+        }
+        if ($this->denyUnless($chatId, $user->hasPermission('applications.view'))) {
             return;
         }
         $query = Application::query()
@@ -757,13 +916,31 @@ class TelegramBotService
             return;
         }
 
+        // Same rules as the web portal upload: PDF / JPG / PNG / WEBP, max 10 MB.
+        $declaredSize = (int) ($message['document']['file_size'] ?? 0);
+        if ($declaredSize > self::MAX_UPLOAD_BYTES) {
+            $this->sendMessage($chatId, '❌ حجم فایل بیشتر از ۱۰ مگابایت است.');
+            return;
+        }
+
         $bytes = $this->downloadTelegramFile($fileId);
         if ($bytes === null) {
             $this->sendMessage($chatId, '❌ دانلود فایل از تلگرام ناموفق بود. دوباره امتحان کن.');
             return;
         }
+        if (strlen($bytes) > self::MAX_UPLOAD_BYTES) {
+            $this->sendMessage($chatId, '❌ حجم فایل بیشتر از ۱۰ مگابایت است.');
+            return;
+        }
 
-        $extension = pathinfo((string) $fileName, PATHINFO_EXTENSION) ?: 'jpg';
+        // Never trust the sender's file name/extension: detect the real type from the content.
+        $mime = (new \finfo(FILEINFO_MIME_TYPE))->buffer($bytes) ?: '';
+        $extension = self::ALLOWED_UPLOAD_MIMES[$mime] ?? null;
+        if ($extension === null) {
+            $this->sendMessage($chatId, '❌ فقط فایل‌های PDF، JPG، PNG یا WEBP قابل قبول هستند.');
+            return;
+        }
+        $fileName = mb_substr(preg_replace('/[^\pL\pN ._()-]+/u', '_', pathinfo((string) $fileName, PATHINFO_FILENAME)) ?: 'document', 0, 120).'.'.$extension;
         $storedName = 'docs/'.bin2hex(random_bytes(20)).'.'.$extension;
         \Illuminate\Support\Facades\Storage::disk('public')->put($storedName, $bytes);
 
@@ -796,24 +973,32 @@ class TelegramBotService
         $this->sendMessage($chatId, '✅ مدرک آپلود شد: <b>'.self::DOC_TYPE_LABELS[$docType].'</b>. تیم ما به‌زودی بررسیش می‌کنه.');
     }
 
+    private const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+    private const ALLOWED_UPLOAD_MIMES = [
+        'application/pdf' => 'pdf',
+        'image/jpeg' => 'jpg',
+        'image/png' => 'png',
+        'image/webp' => 'webp',
+    ];
+
     private function downloadTelegramFile(string $fileId): ?string
     {
         if (!$this->isConfigured()) {
             return null;
         }
+        $fileInfo = $this->api('getFile', ['file_id' => $fileId]);
+        $filePath = $fileInfo['ok'] ? ($fileInfo['result']['file_path'] ?? null) : null;
+        if (!$filePath || (int) ($fileInfo['result']['file_size'] ?? 0) > self::MAX_UPLOAD_BYTES) {
+            return null;
+        }
         try {
-            $fileInfo = Http::get("https://api.telegram.org/bot{$this->token}/getFile", ['file_id' => $fileId]);
-            $filePath = $fileInfo->json('result.file_path');
-            if (!$filePath) {
-                return null;
-            }
-            $response = Http::get("https://api.telegram.org/file/bot{$this->token}/{$filePath}");
-            if (!$response->successful()) {
-                return null;
-            }
-            return $response->body();
+            $response = Http::timeout(30)->get("https://api.telegram.org/file/bot{$this->token}/{$filePath}");
+
+            return $response->successful() ? $response->body() : null;
         } catch (\Throwable $e) {
-            Log::warning('Telegram file download failed: '.$e->getMessage());
+            Log::warning('Telegram file download failed', ['error' => str_replace((string) $this->token, '***', $e->getMessage())]);
+
             return null;
         }
     }
@@ -1115,6 +1300,9 @@ class TelegramBotService
 
     private function handleInbox(string $chatId, User $user): void
     {
+        if ($user->role_slug === 'student' || $this->denyUnless($chatId, $user->hasPermission('messages.view'))) {
+            return;
+        }
         $students = Student::query()
             ->forTenant($user->tenant_id, $user->role_slug)
             ->whereNull('deleted_at')
@@ -1139,8 +1327,11 @@ class TelegramBotService
 
     private function startReplyFlow(string $chatId, User $user, int $studentId): void
     {
+        if ($user->role_slug === 'student' || $this->denyUnless($chatId, $user->hasPermission('messages.view'))) {
+            return;
+        }
         $student = Student::query()->forTenant($user->tenant_id, $user->role_slug)->whereNull('deleted_at')->find($studentId);
-        if (!$student) {
+        if (!$this->canAccessStudent($user, $student)) {
             $this->sendMessage($chatId, 'دانشجو پیدا نشد.');
             return;
         }
@@ -1173,9 +1364,13 @@ class TelegramBotService
 
     private function finishReplyMessage(string $chatId, User $user, TelegramState $state, string $text): void
     {
+        if ($this->denyUnless($chatId, $user->hasPermission('messages.create'))) {
+            $state->delete();
+            return;
+        }
         $studentId = (int) ($state->data()['student_id'] ?? 0);
         $student = Student::query()->forTenant($user->tenant_id, $user->role_slug)->whereNull('deleted_at')->find($studentId);
-        if (!$student) {
+        if (!$this->canAccessStudent($user, $student)) {
             $this->sendMessage($chatId, 'دانشجو پیدا نشد.');
             return;
         }

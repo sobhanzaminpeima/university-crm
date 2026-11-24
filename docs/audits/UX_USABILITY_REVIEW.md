@@ -30,7 +30,7 @@ Rubric: 9–10 polished · 7–8 good with minor friction · 5–6 usable but sl
 | UX-04 | U1 | Global | No translation layer, so Persian/Turkish users get English only. `lang="en"` is hard-coded and there is no RTL. | Proposal P-1 |
 | UX-05 | U2 | Students list | Stage labels showed raw keys (`Documents_pending`, `Visa_process`). | **Fixed** in 6 views |
 | UX-06 | U2 | Sidebar | Two items were highlighted at once (`/agents/performance` lit up *Agents & Roles*; `/settings/study-catalogs` lit up *Settings*). | **Fixed** |
-| UX-07 | U2 | Sidebar | About 27 links. Only 2 groups; 11 admin/config items (API Tokens, Health, SaaS…) are listed flat between daily items. | Proposal P-2 |
+| UX-07 | U2 | Sidebar | About 27 links. Only 2 groups; 11 admin/config items (API Tokens, Health, SaaS…) are listed flat between daily items. | **Fixed in batch 2**: 7 collapsible categories with icons and remembered state |
 | UX-08 | U2 | Topbar (mobile) | The search button was clipped off-screen at 375px (`min-width:100% !important`). | **Fixed** |
 | UX-09 | U2 | A11y | Icon buttons (🔎 🔔 🌓) had no accessible name, there was no skip link or visible focus ring, the toast was not announced, and there was no `aria-expanded`. | **Fixed** in layout |
 | UX-10 | U2 | Students list | Duplicate `id="global-search"` on the same page. | **Fixed** |
@@ -40,6 +40,9 @@ Rubric: 9–10 polished · 7–8 good with minor friction · 5–6 usable but sl
 | UX-14 | U3 | Performance | One full edit `<dialog>` is rendered per table row (up to 100 per page), which makes the HTML heavy. | Proposal P-5 |
 | UX-15 | U3 | Search | No keyboard shortcut to reach search. | **Fixed** (`/` focuses search, `Esc` closes panels) |
 | ENG-01 | P1 | Install | `2026_05_22_000700` was not idempotent and reused the index name `student_messages_tenant_student_idx` from `2026_04_17_000002`, so a fresh install (schema dump + `migrate`) stopped halfway with error 1061. | **Fixed** with `Schema::hasIndex` guards |
+| EXP-01 | U1 | Exports | "Export Excel" produced a tab-separated text file named `.xls`. Students and Applications had no export at all. The university search export contained only the 20 rows on screen. | **Fixed in batch 2**: real styled `.xlsx` everywhere |
+| SEC-02 | P1 | Exports | The program search export ignored the agent "own universities" rule. The Advanced Report exposed all tenant students to agents who have `reports.view`. | **Fixed in batch 2** |
+| SEC-03 | P1 | Telegram | Agents could change any application's status and read or reply to any student's messages in the tenant through bot callbacks. Bot uploads were stored publicly with the sender's file extension. User data was not HTML-escaped. | **Fixed in batch 2** (11 automated checks pass) |
 | SEC-01 | P1 | Dependencies | `composer audit --locked` reports 8 advisories in 5 packages (laravel/framework, symfony/http-foundation ×4, http-kernel, mime, routing). This also fails the existing CI audit step. | Open: patch-level `composer update` needs owner approval |
 
 ## Before / after (local, real browser)
@@ -57,7 +60,7 @@ Measured (Playwright): horizontal overflow 0 px at 1366 and 375 both before and 
 | ID | Proposal | User value | Effort | Risk |
 |---|---|---|---|---|
 | P-1 | **Full i18n + RTL.** Wrap all view strings in `__()`, add a locale switcher (user preference plus cookie), set `<html lang dir>`, use logical CSS properties, and wrap emails and phone numbers in `<bdi dir="ltr">`. | Very high for FA/TR teams | L (3–5 days) | Medium: touches every view |
-| P-2 | **Navigation IA.** Use the groups *Work* (Dashboard, Students, Applications, Pipeline, Tasks, Messages), *Catalog* (Universities, Scholarships, Calendar), *Insights* (Reports, Performance, Finance) and *Admin* (collapsed by default: Users, Templates, Automation, API, Health, Settings, SaaS). Remember the collapsed state. | Faster wayfinding | S | Low |
+| P-2 | ~~**Navigation IA.**~~ Done in batch 2. Use the groups *Work* (Dashboard, Students, Applications, Pipeline, Tasks, Messages), *Catalog* (Universities, Scholarships, Calendar), *Insights* (Reports, Performance, Finance) and *Admin* (collapsed by default: Users, Templates, Automation, API, Health, Settings, SaaS). Remember the collapsed state. | Faster wayfinding | S | Low |
 | P-3 | **Mobile list mode.** Collapse filters into a "Filters (n)" disclosure and show card rows below 760px (name, stage, agent, one primary action). | Agents on phones | M | Low |
 | P-4 | **Undo delete.** Show a toast with *Undo* for 10 s using the existing soft-delete. Requires restoring the portal user too, so the business rule needs approval. | Fewer costly mistakes | S–M | Medium (account re-activation) |
 | P-5 | **Single edit drawer.** Load one edit form on demand (or go to `/students/{id}`) instead of N hidden dialogs. | Faster pages | M | Low |

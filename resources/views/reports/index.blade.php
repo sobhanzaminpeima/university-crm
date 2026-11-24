@@ -4,22 +4,28 @@
 <h1>Advanced Reports</h1>
 <div class="card">
     <form method="GET" action="/reports/advanced" class="grid-4">
-        <input type="date" name="from" value="{{ $from }}">
-        <input type="date" name="to" value="{{ $to }}">
-        <select name="agent_id">
+        <label class="field"><span>Created from</span><input type="date" name="from" value="{{ $from }}"></label>
+        <label class="field"><span>Created to</span><input type="date" name="to" value="{{ $to }}"></label>
+        <label class="field"><span>Agent</span><select name="agent_id">
             <option value="">All Agents</option>
             @foreach($agents as $a)
                 <option value="{{ $a->id }}" @selected((string)$agentId === (string)$a->id)>{{ $a->name }}</option>
             @endforeach
-        </select>
-        <input name="country" value="{{ $country }}" placeholder="Country">
-        <button type="submit">Filter</button>
+        </select></label>
+        <label class="field"><span>Target country</span><input name="country" value="{{ $country }}" placeholder="Any country"></label>
+        <div class="field" style="justify-content:flex-end;flex-direction:row;gap:8px;align-items:flex-end;">
+            <button type="submit">Apply filters</button>
+            @if($from || $to || $agentId || $country)
+                <a class="tab" href="/reports/advanced">Clear</a>
+            @endif
+        </div>
     </form>
-    <p style="margin-top:8px;">
-        <a href="/reports/advanced/export-csv?{{ http_build_query(request()->query()) }}">Export CSV</a> |
-        <a href="/reports/advanced/export-excel?{{ http_build_query(request()->query()) }}">Export Excel</a> |
-        <a href="/reports/advanced/export-pdf?{{ http_build_query(request()->query()) }}">Export PDF</a>
-    </p>
+    @include('partials.export-buttons', [
+        'xlsx' => '/reports/advanced/export-excel?'.http_build_query(request()->query()),
+        'csv' => '/reports/advanced/export-csv?'.http_build_query(request()->query()),
+        'pdf' => '/reports/advanced/export-pdf?'.http_build_query(request()->query()),
+        'pdfLabel' => class_exists(\Dompdf\Dompdf::class) ? 'PDF' : 'Print / PDF',
+    ])
 </div>
 <div class="card" style="margin-top:12px;">
     <table>
@@ -29,7 +35,7 @@
             <tr>
                 <td>{{ $s->full_name }}</td>
                 <td>{{ $s->email }}</td>
-                <td>{{ $s->stage }}</td>
+                <td>{{ ucfirst(str_replace('_', ' ', $s->stage)) }}</td>
                 <td>{{ $s->target_country }}</td>
                 <td>{{ $s->agent?->name ?: '-' }}</td>
                 <td>{{ $s->subAgent?->name ?: '-' }}</td>

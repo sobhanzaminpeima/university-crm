@@ -88,10 +88,14 @@
         <div style="display:flex;gap:8px;grid-column:1/-1;">
             <button type="submit">Search</button>
             <a class="secondary" href="/search" style="text-decoration:none;padding:10px 14px;border-radius:10px;">Reset</a>
-            <a class="secondary" href="/search?{{ http_build_query(array_merge(request()->query(), ['export' => 'universities'])) }}" style="text-decoration:none;padding:10px 14px;border-radius:10px;">Export Universities</a>
-            <a class="secondary" href="/search?{{ http_build_query(array_merge(request()->query(), ['export' => 'programs'])) }}" style="text-decoration:none;padding:10px 14px;border-radius:10px;">Export Programs</a>
         </div>
     </form>
+    <div class="export-actions" role="group" aria-label="Export search results">
+        <span class="export-label">Export</span>
+        <a class="btn-export btn-export-primary" href="/search?{{ http_build_query(array_merge(request()->query(), ['export' => 'universities'])) }}"><span aria-hidden="true">⬇</span> Universities (.xlsx)</a>
+        <a class="btn-export btn-export-primary" href="/search?{{ http_build_query(array_merge(request()->query(), ['export' => 'programs'])) }}"><span aria-hidden="true">⬇</span> Programs (.xlsx)</a>
+        <span class="footer-note export-note">Includes all results matching the current filters (up to 5,000 universities / 3,000 programs).</span>
+    </div>
 </div>
 
 <div class="three-col" style="margin-top:12px;">

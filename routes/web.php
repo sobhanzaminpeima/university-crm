@@ -60,6 +60,7 @@ Route::middleware(['auth.crm', 'tenant', 'subscription.active'])->group(function
     Route::post('/pipeline/preferences', [PipelineController::class, 'savePreferences'])->middleware('permission:students.view');
 
     Route::get('/students', [StudentController::class, 'index'])->middleware('permission:students.view');
+    Route::get('/students/export', [StudentController::class, 'export'])->middleware(['permission:students.view', 'throttle:20,1']);
     Route::post('/students', [StudentController::class, 'store'])->middleware('permission:students.create');
     Route::get('/students/{id}', [StudentController::class, 'show'])->middleware('permission:students.view');
     Route::put('/students/{id}', [StudentController::class, 'update'])->middleware('permission:students.update');
@@ -86,6 +87,7 @@ Route::middleware(['auth.crm', 'tenant', 'subscription.active'])->group(function
     Route::delete('/universities/{id}', [UniversityController::class, 'destroy'])->middleware('permission:universities.delete');
 
     Route::get('/applications', [ApplicationController::class, 'index'])->middleware('permission:applications.view');
+    Route::get('/applications/export', [ApplicationController::class, 'export'])->middleware(['permission:applications.view', 'throttle:20,1']);
     Route::post('/applications', [ApplicationController::class, 'store'])->middleware('permission:applications.create');
     Route::get('/applications/options/universities', [ApplicationController::class, 'universitiesByCountry'])->middleware('permission:applications.view');
     Route::get('/applications/options/programs', [ApplicationController::class, 'programsByUniversity'])->middleware('permission:applications.view');
@@ -187,6 +189,10 @@ Route::middleware(['auth.crm', 'tenant', 'subscription.active'])->group(function
     Route::get('/telegram', [TelegramController::class, 'settings'])->middleware('permission:telegram.use');
     Route::post('/telegram/generate-code', [TelegramController::class, 'generateCode'])->middleware('permission:telegram.use');
     Route::post('/telegram/unlink', [TelegramController::class, 'unlink'])->middleware('permission:telegram.use');
+    Route::post('/telegram/test-message', [TelegramController::class, 'testMessage'])->middleware(['permission:telegram.use', 'throttle:6,1']);
+    Route::post('/telegram/setup/webhook', [TelegramController::class, 'connectWebhook'])->middleware('permission:telegram.use');
+    Route::post('/telegram/setup/webhook/delete', [TelegramController::class, 'disconnectWebhook'])->middleware('permission:telegram.use');
+    Route::post('/telegram/setup/commands', [TelegramController::class, 'registerCommands'])->middleware('permission:telegram.use');
 });
 
 Route::post('/webhooks/student-status', [WebhookController::class, 'studentStatus'])->middleware('throttle:60,1');

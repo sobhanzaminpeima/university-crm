@@ -20,15 +20,15 @@ class ApplicationController extends Controller
     ) {
     }
 
-    public function index(Request $request): View
+    /**
+     * Same filters, tenant scope and agent ownership as the Applications list.
+     */
+    private function listQuery(Request $request, $user)
     {
-        $user = $this->authUser($request);
         $status = (string) $request->query('status', '');
         $q = (string) $request->query('q', '');
-        $universitySort = (string) $request->query('university_sort', 'name_asc');
-        $perPage = $this->perPage($request);
 
-        $applications = Application::query()
+        return Application::query()
             ->forTenant($user->tenant_id, $user->role_slug)
             ->when(in_array($user->role_slug, ['agent', 'sub_agent'], true) && !$user->hasPermission('applications.view_all'), function ($query) use ($user) {
                 $query->whereIn('applications.student_id', function ($sub) use ($user) {
@@ -53,7 +53,58 @@ class ApplicationController extends Controller
                     ->orWhere('applications.notes', 'like', "%{$q}%");
             }))
             ->when($status !== '', fn ($query) => $query->where('status', $status))
-            ->latest('id')
+            ->latest('applications.id');
+    }
+
+    public function export(Request $request): \Symfony\Component\HttpFoundation\Response
+    {
+        $user = $this->authUser($request);
+        $human = fn ($v) => \App\Support\Export\SpreadsheetExport::human($v);
+
+        $columns = [
+            ['label' => 'Student', 'type' => 'string'],
+            ['label' => 'University', 'type' => 'string'],
+            ['label' => 'Program', 'type' => 'string'],
+            ['label' => 'Intake', 'type' => 'string'],
+            ['label' => 'Status', 'type' => 'string'],
+            ['label' => 'Deadline', 'type' => 'date'],
+            ['label' => 'Next Follow-up', 'type' => 'datetime'],
+            ['label' => 'Enrol Probability %', 'type' => 'integer'],
+            ['label' => 'Best Next Action', 'type' => 'string'],
+            ['label' => 'Notes', 'type' => 'string', 'width' => 50],
+            ['label' => 'Created At', 'type' => 'datetime'],
+        ];
+        $rows = $this->listQuery($request, $user)->lazy(500)->map(fn ($a) => [
+            $a->student_name,
+            $a->university_name,
+            $a->program,
+            $a->intake,
+            $human($a->status),
+            $a->deadline,
+            $a->next_followup_at,
+            $a->enroll_probability,
+            $a->best_next_action,
+            $a->notes,
+            $a->created_at,
+        ]);
+
+        $export = \App\Support\Export\SpreadsheetExport::make('Applications', $columns, $rows, [
+            'Search' => (string) $request->query('q', ''),
+            'Status' => $human((string) $request->query('status', '')),
+        ]);
+
+        return (string) $request->query('format', 'xlsx') === 'csv' ? $export->csv('applications') : $export->download('applications');
+    }
+
+    public function index(Request $request): View
+    {
+        $user = $this->authUser($request);
+        $status = (string) $request->query('status', '');
+        $q = (string) $request->query('q', '');
+        $universitySort = (string) $request->query('university_sort', 'name_asc');
+        $perPage = $this->perPage($request);
+
+        $applications = $this->listQuery($request, $user)
             ->paginate($perPage)
             ->withQueryString();
 

@@ -27,6 +27,12 @@
         </form>
         <button onclick="document.getElementById('addStudent').showModal()">+ Add Student</button>
     </div>
+    @php $exportQuery = http_build_query(request()->except(['page', 'per_page'])); @endphp
+    @include('partials.export-buttons', [
+        'xlsx' => '/students/export?'.$exportQuery,
+        'csv' => '/students/export?'.http_build_query(array_merge(request()->except(['page', 'per_page']), ['format' => 'csv'])),
+        'note' => 'Exports every student matching the current search and filters (not only this page).',
+    ])
 
     <table class="table-compact">
         <thead>
